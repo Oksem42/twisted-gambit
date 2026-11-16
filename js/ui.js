@@ -1,10 +1,11 @@
-import * as E from './engine.js';
-import { pieceSVG, tokenSVG } from './pieces.js';
+(function () {
+const E = globalThis.TGEngine;
+const { pieceSVG, tokenSVG } = globalThis.TGPieces;
 
 const { W, B, other, PIECE_NAME } = E;
 const COLOR = { w: 'White', b: 'Black' };
 
-export const TWISTS = [
+const TWISTS = [
   { key: 'hiddenQueen', name: 'Hidden Queen', icon: '♛',
     desc: 'Your queen starts disguised as one of your pawns. It is revealed the first time it moves like a queen.' },
   { key: 'traitor', name: 'Traitor', icon: '🗡',
@@ -693,3 +694,4 @@ window.__tg = { E, get G() { return G; }, ui };
 
 render();
 openNewGame();
+})();

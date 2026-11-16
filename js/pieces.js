@@ -1,3 +1,4 @@
+(function () {
 // Original SVG piece set for Twisted Gambit (chunky, flat, outlined).
 // viewBox 0 0 100 100. Each piece is a list of shapes; `detail` shapes use the accent stroke.
 
@@ -50,7 +51,7 @@ const STYLE = {
 };
 
 const cache = {};
-export function pieceSVG(type, color) {
+function pieceSVG(type, color) {
   const key = type + color;
   if (cache[key]) return cache[key];
   const s = STYLE[color];
@@ -61,10 +62,13 @@ export function pieceSVG(type, color) {
   return cache[key];
 }
 
-export function tokenSVG(color) {
+function tokenSVG(color) {
   const s = STYLE[color];
   return `<svg class="piece-svg" viewBox="0 0 100 100" aria-hidden="true">
     <circle cx="50" cy="54" r="30" fill="${s.fill}" stroke="${s.stroke}" stroke-width="3.6"/>
     <circle cx="50" cy="54" r="21" fill="none" stroke="${s.accent}" stroke-width="2.5" stroke-dasharray="5 5" opacity=".6"/>
     <text x="50" y="66" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="34" fill="${s.accent}">?</text></svg>`;
 }
+
+globalThis.TGPieces = { pieceSVG, tokenSVG };
+})();

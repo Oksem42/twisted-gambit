@@ -11,8 +11,10 @@
 <body>
   <h1>Engine tests</h1>
   <div id="out">Running…</div>
-  <script type="module">
-    import results from './engine.test.js';
+  <script src="../js/engine.js"></script>
+  <script src="engine.test.js"></script>
+  <script>
+    const results = window.TGTestResults;
     const failed = results.filter((r) => !r.ok).length;
     document.getElementById('out').innerHTML =
       results.map((r) => `<div class="${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓' : '✗'} ${r.name}${r.ok ? '' : ' — ' + r.err}</div>`).join('') +

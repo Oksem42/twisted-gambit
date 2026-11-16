@@ -1,31 +1,32 @@
+(function () {
 // Twisted Gambit — rules engine.
 // Pure game logic, no DOM. The win condition is capturing the king (no check / checkmate),
 // which keeps hidden-information twists simple and fair.
 
-export const W = 'w';
-export const B = 'b';
-export const other = (c) => (c === W ? B : W);
-export const FILES = 'abcdefgh';
-export const sq = (f, r) => r * 8 + f;
-export const fileOf = (s) => s % 8;
-export const rankOf = (s) => (s / 8) | 0;
-export const sqName = (s) => FILES[fileOf(s)] + (rankOf(s) + 1);
+const W = 'w';
+const B = 'b';
+const other = (c) => (c === W ? B : W);
+const FILES = 'abcdefgh';
+const sq = (f, r) => r * 8 + f;
+const fileOf = (s) => s % 8;
+const rankOf = (s) => (s / 8) | 0;
+const sqName = (s) => FILES[fileOf(s)] + (rankOf(s) + 1);
 const onBoard = (f, r) => f >= 0 && f < 8 && r >= 0 && r < 8;
 const fwd = (c) => (c === W ? 1 : -1);
 const homeRank = (c) => (c === W ? 0 : 7);
 const pawnRank = (c) => (c === W ? 1 : 6);
 const lastRank = (c) => (c === W ? 7 : 0);
 
-export const PIECE_NAME = { K: 'King', Q: 'Queen', R: 'Rook', B: 'Bishop', N: 'Knight', P: 'Pawn' };
-export const PIECE_VALUE = { K: 0, Q: 9, R: 5, B: 3, N: 3, P: 1 };
+const PIECE_NAME = { K: 'King', Q: 'Queen', R: 'Rook', B: 'Bishop', N: 'Knight', P: 'Pawn' };
+const PIECE_VALUE = { K: 0, Q: 9, R: 5, B: 3, N: 3, P: 1 };
 
 // Bluff Moves hides every piece, so it can't be combined with twists that depend on visible identities.
-export const BLUFF_EXCLUDES = ['hiddenQueen', 'traitor', 'swap'];
+const BLUFF_EXCLUDES = ['hiddenQueen', 'traitor', 'swap'];
 
 const count = (s, c, type) => s.captured[c].filter((x) => x.owner !== c && (!type || x.type === type)).length;
 const pieces = (s, c) => s.board.map((p, i) => [p, i]).filter(([p]) => p && p.owner === c);
 
-export const OBJECTIVES = [
+const OBJECTIVES = [
   { id: 'bishops', text: 'Capture both enemy bishops', goal: 2, progress: (s, c) => count(s, c, 'B') },
   { id: 'knights', text: 'Capture both enemy knights', goal: 2, progress: (s, c) => count(s, c, 'N') },
   { id: 'rooks', text: 'Capture both enemy rooks', goal: 2, progress: (s, c) => count(s, c, 'R') },
@@ -41,11 +42,11 @@ export const OBJECTIVES = [
   { id: 'pawnHunter', text: 'Capture 6 enemy pawns', goal: 6, progress: (s, c) => count(s, c, 'P') },
   { id: 'butcher', text: 'Capture 8 enemy pieces of any kind', goal: 8, progress: (s, c) => count(s, c) },
 ];
-export const objectiveById = (id) => OBJECTIVES.find((o) => o.id === id);
+const objectiveById = (id) => OBJECTIVES.find((o) => o.id === id);
 
 // ---------------------------------------------------------------- setup
 
-export function newGame(twists = {}, rng = Math.random) {
+function newGame(twists = {}, rng = Math.random) {
   const t = { hiddenQueen: false, traitor: false, objective: false, bluff: false, swap: false, ...twists };
   if (t.bluff) for (const k of BLUFF_EXCLUDES) t[k] = false;
   const s = {
@@ -85,7 +86,7 @@ function shuffle(arr, rng) {
 }
 
 /** Bluff Moves: shuffle a side's 16 pieces across its two home ranks and hide them all. */
-export function shuffleArmy(s, c, rng = Math.random) {
+function shuffleArmy(s, c, rng = Math.random) {
   const squares = [];
   for (let f = 0; f < 8; f++) squares.push(sq(f, homeRank(c)), sq(f, pawnRank(c)));
   const ps = shuffle(squares.map((i) => s.board[i]).filter(Boolean), rng);
@@ -96,7 +97,7 @@ export function shuffleArmy(s, c, rng = Math.random) {
 }
 
 /** Hidden Queen: the chosen pawn secretly becomes the queen (still shown as a pawn). */
-export function setHiddenQueen(s, c, i) {
+function setHiddenQueen(s, c, i) {
   const p = s.board[i];
   if (!s.twists.hiddenQueen || !p || p.owner !== c || p.shown !== 'P') return false;
   const prev = findById(s, s.hiddenQueen[c]);
@@ -107,14 +108,14 @@ export function setHiddenQueen(s, c, i) {
 }
 
 /** Traitor: mark one enemy piece (not the king) that you may control for one move later. */
-export function setTraitor(s, c, i) {
+function setTraitor(s, c, i) {
   const p = s.board[i];
   if (!s.twists.traitor || !p || p.owner === c || p.type === 'K') return false;
   s.traitor[c] = { id: p.id, used: false };
   return true;
 }
 
-export function findById(s, id) {
+function findById(s, id) {
   if (id == null) return null;
   const i = s.board.findIndex((p) => p && p.id === id);
   return i < 0 ? null : { piece: s.board[i], sq: i };
@@ -194,7 +195,7 @@ function gen(board, from, type, ctrl, dir, ep = null, castlePiece = null) {
 }
 
 /** Moves available to the side to move from `from`. opts.traitor = move the marked enemy piece. */
-export function legalMoves(s, from, opts = {}) {
+function legalMoves(s, from, opts = {}) {
   if (s.result || s.pending) return [];
   const p = s.board[from];
   if (!p) return [];
@@ -212,7 +213,7 @@ export function legalMoves(s, from, opts = {}) {
   return gen(s.board, from, p.type, me, me, s.ep, p);
 }
 
-export function hasAnyMove(s, c) {
+function hasAnyMove(s, c) {
   const saved = s.turn;
   s.turn = c;
   const pend = s.pending; s.pending = null;
@@ -289,7 +290,7 @@ function checkStuck(s) {
   if (!s.result && !hasAnyMove(s, s.turn)) end(s, other(s.turn), 'left the opponent with no moves');
 }
 
-export function makeMove(s, move) {
+function makeMove(s, move) {
   const me = s.turn;
   const legal = legalMoves(s, move.from, { traitor: !!move.traitor }).find((m) => m.to === move.to);
   if (!legal) throw new Error('Illegal move');
@@ -317,7 +318,7 @@ export function makeMove(s, move) {
 }
 
 /** Secret Swap: exchange the true identities of two of your pieces. Their looks stay the same. */
-export function doSwap(s, a, b) {
+function doSwap(s, a, b) {
   const me = s.turn;
   const pa = s.board[a], pb = s.board[b];
   if (!s.twists.swap || s.swapUsed[me] || s.pending || s.result) throw new Error('Swap not available');
@@ -341,7 +342,7 @@ export function doSwap(s, a, b) {
  * Bluff Moves: the player to move answers the opponent's last move.
  * Returns { outcome: 'accepted' | 'caught' | 'honest', type?, lost? }.
  */
-export function resolveChallenge(s, challenge, rng = Math.random) {
+function resolveChallenge(s, challenge, rng = Math.random) {
   const pend = s.pending;
   if (!pend) throw new Error('Nothing to challenge');
   const challenger = s.turn, bluffer = pend.by;
@@ -390,5 +391,8 @@ export function resolveChallenge(s, challenge, rng = Math.random) {
   return { outcome: 'honest', type: found && found.piece.type, lost };
 }
 
-export function resign(s, c) { end(s, other(c), 'wins by resignation'); }
-export function agreeDraw(s) { end(s, null, 'draw by agreement'); }
+function resign(s, c) { end(s, other(c), 'wins by resignation'); }
+function agreeDraw(s) { end(s, null, 'draw by agreement'); }
+
+globalThis.TGEngine = { W, B, other, FILES, sq, fileOf, rankOf, sqName, PIECE_NAME, PIECE_VALUE, BLUFF_EXCLUDES, OBJECTIVES, objectiveById, newGame, shuffleArmy, setHiddenQueen, setTraitor, findById, legalMoves, hasAnyMove, makeMove, doSwap, resolveChallenge, resign, agreeDraw };
+})();

@@ -1,6 +1,6 @@
-// Engine tests. Run by opening tests/index.html in a browser (served over http),
-// or with Node 18+:  node tests/engine.test.js
-import * as E from '../js/engine.js';
+(function () {
+// Plain script: works in a browser (after js/engine.js) and in Node (node tests/engine.test.js).
+const E = globalThis.TGEngine || (require('../js/engine.js'), globalThis.TGEngine);
 
 const results = [];
 function test(name, fn) {
@@ -163,12 +163,14 @@ test('bluff king capture only counts after acceptance', () => {
   eq(s.result.winner, 'w');
 });
 
-export default results;
+
+globalThis.TGTestResults = results;
 
 // Node runner
-if (typeof process !== 'undefined' && process.argv?.[1]?.endsWith('engine.test.js')) {
+if (typeof window === 'undefined') {
   for (const r of results) console.log(`${r.ok ? '✓' : '✗'} ${r.name}${r.ok ? '' : ' — ' + r.err}`);
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);
   process.exitCode = failed ? 1 : 0;
 }
+})();

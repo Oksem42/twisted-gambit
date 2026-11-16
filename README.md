@@ -20,19 +20,15 @@ Standard chess movement, castling, en passant and promotion, but **you win by ca
 
 ## Play
 
-It's a static site with no build step:
+No install, no build step: **double-click `index.html`** and it opens in your browser.
 
-```bash
-python3 -m http.server 8765
-```
-
-Then open http://localhost:8765. You can also enable **GitHub Pages** (Settings → Pages → deploy from `main`, root) to play it online.
+To play it online, make the repo public and enable **GitHub Pages** (Settings → Pages → deploy from `main`, root).
 
 ## Tests
 
 The rules engine (`js/engine.js`) is pure JavaScript with no DOM. Tests live in `tests/engine.test.js`:
 
-- in a browser: serve the folder and open `/tests/`
+- in a browser: open `tests/index.html`
 - with Node 18+: `node tests/engine.test.js`
 
 ## Project layout
