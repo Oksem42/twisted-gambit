@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Twisted Gambit — engine tests</title>
+  <style>
+    body { font: 15px/1.6 system-ui, sans-serif; background: #312e2b; color: #fff; padding: 24px; }
+    .ok { color: #81b64c; } .bad { color: #ff6b6b; }
+  </style>
+</head>
+<body>
+  <h1>Engine tests</h1>
+  <div id="out">Running…</div>
+  <script type="module">
+    import results from './engine.test.js';
+    const failed = results.filter((r) => !r.ok).length;
+    document.getElementById('out').innerHTML =
+      results.map((r) => `<div class="${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓' : '✗'} ${r.name}${r.ok ? '' : ' — ' + r.err}</div>`).join('') +
+      `<h2 id="summary" class="${failed ? 'bad' : 'ok'}">${results.length - failed}/${results.length} passed</h2>`;
+  </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Twisted Gambit</title>
+  <meta name="description" content="Chess with secret twists: Hidden Queen, Traitor, Hidden Objective, Bluff Moves and Secret Swap.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♞</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">♞</span><span>Twisted Gambit</span></div>
+    <nav>
+      <button id="btn-rules" class="btn ghost">Rules</button>
+      <button id="btn-new" class="btn ghost">New Game</button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="board-col">
+      <div class="player-bar" id="bar-top"></div>
+      <div class="board-wrap">
+        <div id="board" class="board" aria-label="Chess board"></div>
+      </div>
+      <div class="player-bar" id="bar-bottom"></div>
+    </section>
+    <aside class="panel" id="panel"></aside>
+  </main>
+
+  <div id="overlay" class="overlay hidden"></div>
+  <div id="modal" class="modal-backdrop hidden"></div>
+  <div id="drag-ghost" class="pc drag-ghost hidden"></div>
+
+  <script type="module" src="js/ui.js"></script>
+</body>
+</html>
