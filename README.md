@@ -1,18 +1,15 @@
 # ♞ Twisted Gambit
 
-Chess with secrets. Two players share one device (pass & play), pick any mix of five twists, and try to out-think and out-bluff each other.
+Chess with secrets. Pick a game mode, then play a friend on the same device (pass & play) or online.
 
-## The twists
+## Game modes
 
-| Twist | What it does |
+| Mode | What it does |
 |---|---|
-| ♛ **Hidden Queen** | Your queen starts disguised as one of your pawns (you pick which). It's revealed the first time it makes a move a pawn couldn't. |
+| ♛ **Secret Queen** | You keep your normal queen and also pick one pawn to be a second, secret queen. It looks like a pawn and stays disguised as long as it moves like one. The first time it makes a move only a queen could, it's revealed. |
 | 🗡 **Traitor** | Secretly mark one enemy piece. Once per game, use your turn to move it as if it were yours, including capturing its own teammates. |
 | 🎯 **Hidden Objective** | Each player draws a secret goal (e.g. *capture both enemy knights*, *land a knight on the enemy back rank*). Complete it, or capture the king, to win. |
-| 🃏 **Bluff Moves** | Every piece is shuffled and hidden. Any piece may *claim* any queen or knight move. After each move the opponent accepts or challenges: a caught bluff loses the piece and the move is undone, while a wrong challenge costs the challenger a random piece. |
 | ⇄ **Secret Swap** | Once per game, swap the true identities of two of your pieces. To your opponent they keep their old look until one moves in a way its disguise couldn't. |
-
-Bluff Moves hides everything, so it can't be combined with Hidden Queen, Traitor or Secret Swap. Every other combination works.
 
 ## Base rules
 
@@ -22,11 +19,18 @@ Standard chess movement, castling, en passant and promotion, but **you win by ca
 
 No install, no build step: **double-click `index.html`** and it opens in your browser.
 
-To play it online, make the repo public and enable **GitHub Pages** (Settings → Pages → deploy from `main`, root).
+- **Pass & Play:** two players on one device. A privacy screen hides the board between turns.
+- **Play Online:** click *Play Online → Create Game* to get a 5-letter code and send it to a friend.
+  They open the game, click *Play Online*, and enter the code under *Join a game*. The creator plays White.
+  Both players need the game (the files, or a hosted copy) and an internet connection.
+
+Online play uses [PeerJS](https://peerjs.com) (MIT) to connect the two browsers directly. PeerJS's free public server only introduces the players to each other. Both browsers hold the full game state, so a player who opens the browser's developer tools could peek at secrets. It's built for friendly games.
+
+To host it so friends can just open a link, make the repo public and enable **GitHub Pages** (Settings → Pages → deploy from `main`, root).
 
 ## Tests
 
-The rules engine (`js/engine.js`) is pure JavaScript with no DOM. Tests live in `tests/engine.test.js`:
+The rules engine (`js/engine.js`) is plain JavaScript with no DOM. Tests live in `tests/engine.test.js`:
 
 - in a browser: open `tests/index.html`
 - with Node 18+: `node tests/engine.test.js`
@@ -36,15 +40,16 @@ The rules engine (`js/engine.js`) is pure JavaScript with no DOM. Tests live in 
 ```
 index.html        page shell
 style.css         chess.com-inspired dark theme: sidebar, green board, tabbed side panel
-js/engine.js      rules: move generation, twists, win conditions
+js/engine.js      rules: move generation, game modes, win conditions
 js/pieces.js      original SVG piece set
-js/ui.js          board rendering, click/drag input, secret setup, pass-and-play flow
+js/ui.js          board, input, secret setup, pass-and-play and online play
 tests/            engine tests
 ```
 
+The engine still contains an experimental **Bluff Moves** mode (all pieces hidden, any piece may claim a queen or knight move, with challenges). It's turned off in the menu for now.
+
 ## Ideas for next steps
 
-- Online play (each player on their own device, which removes the need for the privacy screen)
 - A simple AI opponent
-- Sound effects and move animations
-- More objectives and twists
+- Move animations
+- More objectives and modes
