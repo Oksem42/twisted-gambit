@@ -39,8 +39,9 @@ The rules engine (`js/engine.js`) is pure JavaScript with no DOM. Tests live in 
 
 ```
 index.html        page shell
-style.css         dark theme with a green board, inspired by the big online chess sites
+style.css         chess.com-inspired dark theme: sidebar, green board, tabbed side panel
 js/engine.js      rules: move generation, twists, win conditions
+js/pieces.js      original SVG piece set
 js/ui.js          board rendering, click/drag input, secret setup, pass-and-play flow
 tests/            engine tests
 ```

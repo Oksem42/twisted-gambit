@@ -9,19 +9,29 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="brand-mark">♞</span><span>Twisted Gambit</span></div>
-    <nav>
-      <button id="btn-rules" class="btn ghost">Rules</button>
-      <button id="btn-new" class="btn ghost">New Game</button>
+  <aside class="sidebar">
+    <a class="logo" href="./" aria-label="Twisted Gambit home">
+      <span class="logo-mark" id="logo-mark"></span>
+      <span class="logo-text">Twisted<b>Gambit</b></span>
+    </a>
+    <nav class="side-nav">
+      <button class="side-item active" data-nav="play"><span class="si-ic" id="nav-ic-play"></span><span>Play</span></button>
+      <button class="side-item" data-nav="new"><span class="si-ic plus">+</span><span>New Game</span></button>
+      <button class="side-item" data-nav="rules"><span class="si-ic book">?</span><span>Rules</span></button>
+      <a class="side-item" href="https://github.com/Oksem42/twisted-gambit" target="_blank" rel="noopener"><span class="si-ic code">&lt;/&gt;</span><span>Source</span></a>
     </nav>
-  </header>
+    <div class="side-foot">
+      <button class="btn primary side-cta" data-nav="new">Play Now</button>
+      <button class="side-item small" id="sound-toggle"><span class="si-ic snd" id="sound-ic">🔊</span><span id="sound-label">Sound on</span></button>
+    </div>
+  </aside>
 
   <main class="layout">
     <section class="board-col">
       <div class="player-bar" id="bar-top"></div>
-      <div class="board-wrap">
+      <div class="board-wrap" id="board-wrap">
         <div id="board" class="board" aria-label="Chess board"></div>
+        <div id="board-modal" class="board-modal hidden"></div>
       </div>
       <div class="player-bar" id="bar-bottom"></div>
     </section>

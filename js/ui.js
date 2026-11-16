@@ -1,7 +1,7 @@
 import * as E from './engine.js';
+import { pieceSVG, tokenSVG } from './pieces.js';
 
 const { W, B, other, PIECE_NAME } = E;
-const GLYPH = { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞', P: '♟︎' };
 const COLOR = { w: 'White', b: 'Black' };
 
 export const TWISTS = [
@@ -19,18 +19,45 @@ export const TWISTS = [
 
 const $ = (id) => document.getElementById(id);
 const boardEl = $('board'), panel = $('panel'), overlay = $('overlay'), modal = $('modal'), ghost = $('drag-ghost');
+const boardModal = $('board-modal');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('tg.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('tg.' + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+};
 
 let G = E.newGame({});
 const ui = {
   phase: 'menu', // menu | secret | play | over
-  viewer: W, selected: null, moves: [], mode: null, swapFirst: null, fresh: null, flash: '',
-  setupQueue: [], names: { w: 'White', b: 'Black' }, privacy: true,
-  twists: { hiddenQueen: true, traitor: true, objective: true, bluff: false, swap: true },
+  viewer: W, flipped: false, selected: null, moves: [], mode: null, swapFirst: null, fresh: null, flash: '',
+  setupQueue: [], names: store.get('names', { w: 'White', b: 'Black' }), privacy: store.get('privacy', true),
+  twists: store.get('twists', { hiddenQueen: true, traitor: true, objective: true, bluff: false, swap: true }),
+  sound: store.get('sound', true), showResult: false,
   clock: { w: 0, b: 0, running: null, since: 0 },
 };
 const nm = (c) => esc(ui.names[c] || COLOR[c]);
 const isOmni = () => ui.phase === 'menu' || ui.phase === 'over';
+
+// ---------------------------------------------------------------- sound (tiny synthesized clicks)
+let actx = null;
+function sound(kind) {
+  if (!ui.sound) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]] }[kind];
+    for (const [f0, f1, delay] of tones) {
+      const t = actx.currentTime + delay;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = kind === 'end' ? 'sine' : 'triangle';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f1, t + 0.09);
+      g.gain.setValueAtTime(kind === 'end' ? 0.18 : 0.4, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + (kind === 'end' ? 0.3 : 0.12));
+      o.connect(g).connect(actx.destination);
+      o.start(t); o.stop(t + 0.32);
+    }
+  } catch { /* audio unavailable */ }
+}
 
 // ---------------------------------------------------------------- clocks (time used per player)
 function tick() {
@@ -45,7 +72,7 @@ function stopClock() { tick(); ui.clock.running = null; }
 const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 function updateClocks() {
   document.querySelectorAll('.clock[data-c]').forEach((el) => {
-    el.textContent = fmt(ui.clock[el.dataset.c]);
+    el.querySelector('.ct').textContent = fmt(ui.clock[el.dataset.c]);
     el.classList.toggle('active', ui.clock.running === el.dataset.c);
   });
 }
@@ -58,14 +85,13 @@ function pieceHTML(p, extra = '') {
   const t = seeTrue ? p.type : p.shown;
   let badges = '';
   if (seeTrue && p.shown && p.shown !== p.type) {
-    badges += `<span class="badge mask" title="Your opponent sees a ${PIECE_NAME[p.shown]}">${GLYPH[p.shown]}</span>`;
+    badges += `<span class="badge mask" title="Your opponent sees a ${PIECE_NAME[p.shown]}">${pieceSVG(p.shown, 'w')}</span>`;
   }
   for (const c of omni ? [W, B] : [ui.viewer]) {
     const tr = G.traitor[c];
     if (tr && tr.id === p.id && !tr.used) badges += `<span class="badge dagger" title="${COLOR[c]}'s traitor">🗡</span>`;
   }
-  if (!t) return `<div class="pc token ${p.owner} ${extra}"><span class="g">?</span>${badges}</div>`;
-  return `<div class="pc ${p.owner} ${extra}"><span class="g">${GLYPH[t]}</span>${badges}</div>`;
+  return `<div class="pc ${p.owner} ${extra}">${t ? pieceSVG(t, p.owner) : tokenSVG(p.owner)}${badges}</div>`;
 }
 
 function currentStep() { return ui.phase === 'secret' && ui.setupQueue[0] ? ui.setupQueue[0].steps[0] : null; }
@@ -90,7 +116,7 @@ function pickSets() {
 }
 
 function renderBoard() {
-  const flip = ui.viewer === B;
+  const flip = (ui.viewer === B) !== ui.flipped;
   const targets = new Map(ui.moves.map((m) => [m.to, m]));
   const { pickable, picked } = pickSets();
   let html = '';
@@ -138,24 +164,34 @@ function publicChips(c) {
   return chips.join('');
 }
 
-function renderBar(el, c) {
-  const caps = G.captured[c].filter((x) => x.owner !== c).sort((a, b) => E.PIECE_VALUE[b.type] - E.PIECE_VALUE[a.type]);
-  const glyphs = caps.map((x) => GLYPH[x.type]).join('');
+function capturedHTML(c) {
+  const caps = G.captured[c].filter((x) => x.owner !== c);
+  const order = ['P', 'N', 'B', 'R', 'Q', 'K'];
+  const groups = order.map((t) => caps.filter((x) => x.type === t)).filter((g) => g.length);
   const adv = material(c) - material(other(c));
+  return groups.map((g) => `<span class="grp">${g.map((x) => pieceSVG(x.type, x.owner)).join('')}</span>`).join('')
+    + (adv > 0 ? `<span class="adv">+${adv}</span>` : '');
+}
+
+const avatar = (c, cls = '') => `<div class="avatar ${c} ${cls}">${pieceSVG('P', c)}</div>`;
+
+function renderBar(el, c) {
   el.innerHTML = `
-    <div class="avatar ${c}">${GLYPH.K}</div>
+    ${avatar(c)}
     <div class="who">
-      <div class="name"><span class="nm">${nm(c)}</span> ${publicChips(c)}</div>
-      <div class="caps">${glyphs}${adv > 0 ? `<span class="adv">+${adv}</span>` : ''}</div>
+      <div class="name"><span class="nm">${nm(c)}</span><span class="tag">(${COLOR[c]})</span><span class="chips">${publicChips(c)}</span></div>
+      <div class="caps">${capturedHTML(c)}</div>
     </div>
-    <div class="clock" data-c="${c}">${fmt(ui.clock[c])}</div>`;
+    <div class="clock" data-c="${c}"><span class="ci">⏱</span><span class="ct">${fmt(ui.clock[c])}</span></div>`;
 }
 
 function render() {
+  const bottom = ui.flipped ? other(ui.viewer) : ui.viewer;
   renderBoard();
-  renderBar($('bar-bottom'), ui.viewer);
-  renderBar($('bar-top'), other(ui.viewer));
+  renderBar($('bar-bottom'), bottom);
+  renderBar($('bar-top'), other(bottom));
   renderPanel();
+  renderBoardModal();
   updateClocks();
 }
 
@@ -195,7 +231,7 @@ function secretItems(c) {
 
 function setupCard() {
   const c = ui.viewer, step = currentStep();
-  const head = `<div class="flash" style="margin:0 0 6px;color:var(--muted)">${nm(c)} · secret setup</div>`;
+  const head = `<div class="eyebrow">${nm(c)} · secret setup</div>`;
   if (step === 'hiddenQueen') {
     return `<div class="card alert">${head}<h3>♛ Hide your queen</h3>
       <p>Click one of your pawns. It secretly becomes your queen. Your opponent sees a pawn until it makes a move only a queen could.</p>
@@ -225,11 +261,12 @@ function setupCard() {
 function playCard() {
   const c = G.turn;
   if (G.turn !== ui.viewer) {
-    return `<div class="card status"><h3>Waiting…</h3><p>Pass the device to ${nm(c)}.</p></div>`;
+    return `<div class="card"><h3>Waiting…</h3><p>Pass the device to ${nm(c)}.</p></div>`;
   }
   if (G.pending) {
     const m = G.pending.move;
-    const cap = G.lastMove && G.history.length && G.history[G.history.length - 1].text.includes('x');
+    const last = G.history[G.history.length - 1];
+    const cap = last && last.text.includes('x');
     return `<div class="card alert"><h3>🃏 Call the bluff?</h3>
       <p>${nm(G.pending.by)} moved a hidden piece <b>${E.sqName(m.from)} → ${E.sqName(m.to)}</b>${cap ? ' and captured' : ''}.
       If that piece couldn't legally make the move, it's removed and the move is undone.
@@ -238,7 +275,7 @@ function playCard() {
       <button class="btn primary" data-act="accept">Accept</button></div></div>`;
   }
   let hint = G.twists.bluff
-    ? 'Click or drag a piece. Any piece may move like a queen or a knight, but if you get caught bluffing, you lose it.'
+    ? 'Any piece may move like a queen or a knight, but if you get caught bluffing, you lose it.'
     : 'Click or drag a piece to move. Capture the king to win.';
   let actions = '';
   if (ui.mode === 'traitor') {
@@ -253,27 +290,36 @@ function playCard() {
     if (G.twists.swap && !G.swapUsed[c]) btns.push('<button class="btn" data-act="swap">⇄ Secret Swap</button>');
     if (btns.length) actions = `<div class="btn-row">${btns.join('')}</div>`;
   }
-  return `<div class="card status"><h3><span class="dotlive"></span>${nm(c)} to move</h3><p>${hint}</p>${actions}
+  return `<div class="card"><h3><span class="dotlive"></span>${nm(c)} to move</h3><p>${hint}</p>${actions}
     ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
+}
+
+function resultText() {
+  const r = G.result;
+  return r.winner ? `${nm(r.winner)} ${r.reason}.` : 'The players agreed to a draw.';
 }
 
 function overCard() {
   const r = G.result;
-  const title = r.winner ? `🏆 ${nm(r.winner)} wins` : '½ Draw';
   const reveal = [W, B].map((c) => {
     const items = secretItems(c);
     return items ? `<div class="section-label">${nm(c)}'s secrets</div><ul class="secret-list">${items}</ul>` : '';
   }).join('');
-  return `<div class="card win"><h3>${title}</h3><p>${r.winner ? `${nm(r.winner)} ${r.reason}.` : 'The players agreed to a draw.'}</p>
+  return `<div class="card"><h3>${r.winner ? `🏆 ${nm(r.winner)} won` : '½ Draw'}</h3><p>${resultText()}</p>
     <div class="btn-row"><button class="btn primary" data-act="rematch">Rematch</button><button class="btn" data-act="new">New Game</button></div>
     ${reveal}</div>`;
+}
+
+function moveText(e) {
+  // Turn a leading piece letter into a little piece icon, like a figurine move list.
+  return esc(e.text).replace(/^(🗡 )?([KQRBN])/, (_, tr, l) => `${tr || ''}${pieceSVG(l, 'w').replace('class="piece-svg"', 'class="piece-svg fig"')}`);
 }
 
 function movesHTML() {
   const h = G.history;
   if (!h.length) return '<div class="moves"><div class="moves-title">Moves</div><div class="empty">No moves yet.</div></div>';
   const cell = (e, idx) => (e
-    ? `<span class="m ${idx === h.length - 1 ? 'last' : ''} ${e.caught ? 'caught' : ''}"><span class="t">${e.text}</span>${e.note ? `<span class="note">${e.note}</span>` : ''}</span>`
+    ? `<span class="m ${idx === h.length - 1 ? 'last' : ''} ${e.caught ? 'caught' : ''}"><span class="t">${moveText(e)}</span>${e.note ? `<span class="note">${e.note}</span>` : ''}</span>`
     : '<span></span>');
   let rows = '';
   for (let i = 0; i < h.length; i += 2) rows += `<div class="move-row"><span class="n">${i / 2 + 1}.</span>${cell(h[i], i)}${cell(h[i + 1], i + 1)}</div>`;
@@ -286,9 +332,10 @@ function renderPanel() {
   let body = '';
   if (ui.phase === 'menu') {
     body = `<div class="card"><h3>Chess, with secrets</h3><p>Pick your twists, pass the device back and forth, and try to out-bluff your opponent.</p>
-      <button class="btn primary big" data-act="new">New Game</button></div>`;
+      <button class="btn primary big" data-act="new">Play</button></div>`;
   } else if (ui.phase === 'secret') {
-    body = setupCard() + (secretItems(ui.viewer) ? `<div class="card"><h3>Your secrets</h3><ul class="secret-list">${secretItems(ui.viewer)}</ul></div>` : '');
+    const items = secretItems(ui.viewer);
+    body = setupCard() + (items ? `<div class="card"><h3>🔒 Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else if (ui.phase === 'play') {
     const items = G.turn === ui.viewer ? secretItems(ui.viewer) : '';
     body = playCard() + (items ? `<div class="card"><h3>🔒 Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
@@ -298,18 +345,51 @@ function renderPanel() {
   if (ui.phase !== 'menu') body += movesHTML();
   const playing = ui.phase === 'play' && G.turn === ui.viewer && !G.pending;
   panel.innerHTML = `
-    <div class="panel-head">♟︎ Pass &amp; Play <span class="sub">${ui.phase === 'menu' ? '' : `Move ${Math.floor(G.ply / 2) + 1}`}</span></div>
-    <div class="twist-row">${ui.phase === 'menu' ? '<span class="chip">Choose twists in New Game</span>' : chips}</div>
+    <div class="tabs">
+      <button class="tab active" data-act="noop"><span class="ti">${pieceSVG('P', 'w')}</span>Play</button>
+      <button class="tab" data-act="new"><span class="ti">＋</span>New Game</button>
+      <button class="tab" data-act="rules"><span class="ti">📖</span>Rules</button>
+    </div>
+    <div class="twist-row">${ui.phase === 'menu' ? '<span class="chip">Pick twists in New Game</span>' : chips}</div>
     <div class="panel-body" id="panel-body">${body}</div>
     <div class="panel-foot">
-      <button class="btn" data-act="resign" ${playing ? '' : 'disabled'}>🏳 Resign</button>
-      <button class="btn" data-act="draw" ${playing ? '' : 'disabled'}>½ Draw</button>
-      <button class="btn" data-act="rules">📖 Rules</button>
+      <button class="icon-btn" data-act="resign" ${playing ? '' : 'disabled'} title="Resign"><span class="ib">⚑</span>Resign</button>
+      <button class="icon-btn" data-act="draw" ${playing ? '' : 'disabled'} title="Draw"><span class="ib">½</span>Draw</button>
+      <button class="icon-btn" data-act="flip" title="Flip board"><span class="ib">⇅</span>Flip</button>
     </div>`;
   const pb = $('panel-body');
-  const mv = pb.querySelector('.moves');
-  if (mv && ui.phase === 'play') pb.scrollTop = pb.scrollHeight;
+  if (ui.phase === 'play') pb.scrollTop = pb.scrollHeight;
 }
+
+function renderBoardModal() {
+  if (ui.phase !== 'over' || !ui.showResult) { boardModal.classList.add('hidden'); return; }
+  const r = G.result;
+  boardModal.innerHTML = `<div class="go-card" role="dialog" aria-label="Game over">
+      <div class="go-head ${r.winner ? '' : 'draw'}">
+        <button class="btn ghost small x" data-bm="close" aria-label="Close">✕</button>
+        <h2>${r.winner ? `${nm(r.winner)} Won` : 'Draw'}</h2><p>${r.winner ? esc(r.reason.replace(/^wins /, '')) : 'by agreement'}</p>
+      </div>
+      <div class="go-players">
+        <div class="go-player ${r.winner === W ? 'won' : ''}">${avatar(W)}<span>${nm(W)}</span></div>
+        <span class="go-vs">vs</span>
+        <div class="go-player ${r.winner === B ? 'won' : ''}">${avatar(B)}<span>${nm(B)}</span></div>
+      </div>
+      <div class="go-actions">
+        <button class="btn primary big" data-bm="rematch">Rematch</button>
+        <button class="btn" data-bm="new">New Game</button>
+      </div></div>`;
+  boardModal.classList.remove('hidden');
+}
+
+boardModal.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-bm]');
+  if (!b && e.target !== boardModal) return;
+  const a = b ? b.dataset.bm : 'close';
+  ui.showResult = false;
+  if (a === 'rematch') return startGame(ui.twists);
+  if (a === 'new') { render(); return openNewGame(); }
+  render();
+});
 
 // ---------------------------------------------------------------- flow
 function traitorReady(c) {
@@ -332,9 +412,9 @@ function handoff(color, purpose = 'turn') {
   else if (G.pending) msg = `${nm(G.pending.by)} just moved a hidden piece. Decide whether to call the bluff.`;
   else if (ui.phase === 'play' && G.ply === 0) msg = 'Setup is done. The game begins. White moves first.';
   overlay.innerHTML = `<div class="pass-card">
-      <div class="big-piece pc ${color}"><span class="g">${GLYPH.K}</span></div>
+      <div class="big-piece">${pieceSVG('K', color)}</div>
       <h2>Pass to ${nm(color)}</h2><p>${msg}</p>
-      <button class="btn primary big" id="pass-go">I'm ${nm(color)}. Show my board.</button></div>`;
+      <button class="btn primary big" id="pass-go">I'm ${nm(color)}</button></div>`;
   overlay.classList.remove('hidden');
   $('pass-go').onclick = go;
 }
@@ -354,9 +434,10 @@ function runSetup() {
 
 function startGame(twists) {
   ui.twists = { ...twists };
+  store.set('twists', ui.twists);
   G = E.newGame(twists);
   ui.clock = { w: 0, b: 0, running: null, since: 0 };
-  Object.assign(ui, { selected: null, moves: [], mode: null, swapFirst: null, fresh: null, flash: '' });
+  Object.assign(ui, { selected: null, moves: [], mode: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false });
   const steps = ['hiddenQueen', 'traitor', 'objective', 'bluff'].filter((k) => G.twists[k]);
   ui.setupQueue = steps.length ? [W, B].map((c) => ({ color: c, steps: [...steps], started: false })) : [];
   closeModal();
@@ -368,19 +449,27 @@ function afterAction() {
   if (G.result) return gameOver();
   stopClock();
   render();
-  setTimeout(() => handoff(G.turn), ui.privacy ? 650 : 200);
+  setTimeout(() => handoff(G.turn), ui.privacy ? 650 : 250);
 }
 
 function gameOver() {
   stopClock();
   ui.phase = 'over';
+  ui.showResult = true;
   ui.selected = null; ui.moves = []; ui.mode = null;
   overlay.classList.add('hidden');
+  sound('end');
   render();
 }
 
+function capturesNow() { return G.captured.w.length + G.captured.b.length; }
+
 function doMove(m) {
+  const before = capturesNow();
+  const revealedBefore = G.board.filter((p) => p && p.shown === p.type).length;
   try { E.makeMove(G, m); } catch (e) { ui.flash = e.message; return render(); }
+  const revealed = G.board.filter((p) => p && p.shown === p.type).length > revealedBefore && !G.twists.bluff;
+  sound(revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
   ui.fresh = m.to;
   ui.flash = '';
   afterAction();
@@ -398,6 +487,7 @@ function onSwapClick(i) {
     return render();
   }
   E.doSwap(G, ui.swapFirst, i);
+  sound('reveal');
   ui.fresh = null;
   ui.flash = '';
   afterAction();
@@ -405,9 +495,18 @@ function onSwapClick(i) {
 
 // ---------------------------------------------------------------- board input (click + drag)
 let drag = null;
+let hoverEl = null;
+const setHover = (el) => {
+  if (hoverEl === el) return;
+  if (hoverEl) hoverEl.classList.remove('hover');
+  hoverEl = el;
+  if (hoverEl) hoverEl.classList.add('hover');
+};
+
 boardEl.addEventListener('pointerdown', (e) => {
   const el = e.target.closest('.sq');
   if (!el) return;
+  e.preventDefault();
   const i = +el.dataset.sq;
   if (ui.phase === 'secret') {
     const step = currentStep();
@@ -441,18 +540,20 @@ window.addEventListener('pointermove', (e) => {
   if (!drag.moved) {
     if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
     drag.moved = true;
-    ghost.className = drag.src.className + ' drag-ghost';
+    ghost.className = drag.src.className.replace('fresh', '') + ' drag-ghost';
     ghost.innerHTML = drag.src.innerHTML;
     drag.src.classList.add('dragging');
   }
   ghost.style.left = e.clientX + 'px';
   ghost.style.top = e.clientY + 'px';
+  setHover(document.elementFromPoint(e.clientX, e.clientY)?.closest('.sq') || null);
 });
 
 window.addEventListener('pointerup', (e) => {
   if (!drag) return;
   const d = drag;
   drag = null;
+  setHover(null);
   ghost.className = 'pc drag-ghost hidden';
   if (!d.moved) return;
   const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.sq');
@@ -470,6 +571,7 @@ panel.addEventListener('click', (e) => {
   switch (act) {
     case 'new': return openNewGame();
     case 'rules': return openRules();
+    case 'flip': ui.flipped = !ui.flipped; return render();
     case 'rematch': return startGame(ui.twists);
     case 'confirm': ui.setupQueue[0].steps.shift(); return runSetup();
     case 'reshuffle': E.shuffleArmy(G, c); return render();
@@ -486,8 +588,8 @@ panel.addEventListener('click', (e) => {
     case 'challenge':
     case 'accept': {
       const res = E.resolveChallenge(G, act === 'challenge');
-      if (res.outcome === 'caught') ui.flash = `Bluff caught! It was really a ${PIECE_NAME[res.type]}, and it's been removed. Your move.`;
-      else if (res.outcome === 'honest') ui.flash = `It was an honest ${PIECE_NAME[res.type]}. You lost ${res.lost ? 'a ' + PIECE_NAME[res.lost] : 'nothing'}. Your move.`;
+      if (res.outcome === 'caught') { ui.flash = `Bluff caught! It was really a ${PIECE_NAME[res.type]}, and it's been removed. Your move.`; sound('capture'); }
+      else if (res.outcome === 'honest') { ui.flash = `It was an honest ${PIECE_NAME[res.type]}. You lost ${res.lost ? 'a ' + PIECE_NAME[res.lost] : 'nothing'}. Your move.`; sound('capture'); }
       else ui.flash = '';
       if (G.result) return gameOver();
       return render();
@@ -510,7 +612,7 @@ function openNewGame() {
   const t = { ...ui.twists };
   const draw = () => {
     modal.innerHTML = `<div class="modal" role="dialog" aria-label="New game">
-      <div class="modal-head"><h2>New Game</h2><button class="btn ghost small" data-close>✕</button></div>
+      <div class="modal-head"><h2>${pieceSVG('N', 'w')} New Game</h2><button class="btn ghost small" data-close>✕</button></div>
       <div class="modal-body">
         <div class="section-label">Pick your twists</div>
         <div class="twist-grid">${TWISTS.map((tw) => `
@@ -542,6 +644,8 @@ function openNewGame() {
     ui.names.w = $('name-w').value.trim() || 'White';
     ui.names.b = $('name-b').value.trim() || 'Black';
     ui.privacy = $('privacy').checked;
+    store.set('names', ui.names);
+    store.set('privacy', ui.privacy);
   };
   draw();
   modal.classList.remove('hidden');
@@ -562,15 +666,27 @@ function openRules() {
         <li><b>Traitor:</b> using it takes your whole turn. If the traitor is captured first, the power is lost.</li>
         <li><b>Bluff Moves:</b> after every move, the opponent must accept or challenge before moving.
           Kings are hidden too, so a "king capture" only counts once the move is accepted or survives a challenge.</li>
-        <li><b>Secret Swap:</b> takes your turn. The log shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
+        <li><b>Secret Swap:</b> takes your turn. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Pass &amp; play:</b> between turns a privacy screen hides the board so the next player can take the device.</li>
       </ul>
     </div></div>`;
   modal.classList.remove('hidden');
 }
 
-$('btn-new').addEventListener('click', openNewGame);
-$('btn-rules').addEventListener('click', openRules);
+// ---------------------------------------------------------------- sidebar
+$('logo-mark').innerHTML = pieceSVG('N', 'w').replace(/#ffffff/g, '#81b64c').replace(/#302e2c/g, '#1e2a14');
+$('nav-ic-play').innerHTML = pieceSVG('P', 'w');
+document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => {
+  const n = b.dataset.nav;
+  if (n === 'new') openNewGame();
+  if (n === 'rules') openRules();
+}));
+function renderSound() {
+  $('sound-ic').textContent = ui.sound ? '🔊' : '🔇';
+  $('sound-label').textContent = ui.sound ? 'Sound on' : 'Sound off';
+}
+$('sound-toggle').addEventListener('click', () => { ui.sound = !ui.sound; store.set('sound', ui.sound); renderSound(); if (ui.sound) sound('move'); });
+renderSound();
 
 // Expose for debugging / automated checks.
 window.__tg = { E, get G() { return G; }, ui };

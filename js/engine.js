@@ -258,8 +258,12 @@ function applyMove(s, m, ctrl) {
     if (p.type === 'P') { p.type = 'Q'; promoted = true; s.stats[p.owner].promotions++; }
     if (p.shown === 'P') { if (p.type !== 'Q') revealed = true; p.shown = p.type; }
   }
-  const letter = shownBefore ? (shownBefore === 'P' ? '' : shownBefore) : '?';
-  let text = m.castle ? (m.castle === 'K' ? 'O-O' : 'O-O-O') : `${letter}${sqName(m.from)}${victim ? 'x' : '-'}${sqName(m.to)}`;
+  // Short algebraic-style notation based on what the opponent can see.
+  let text;
+  if (m.castle) text = m.castle === 'K' ? 'O-O' : 'O-O-O';
+  else if (!shownBefore) text = `?${sqName(m.from)}${victim ? 'x' : '–'}${sqName(m.to)}`;
+  else if (shownBefore === 'P') text = `${victim ? FILES[fileOf(m.from)] + 'x' : ''}${sqName(m.to)}`;
+  else text = `${shownBefore}${victim ? 'x' : ''}${sqName(m.to)}`;
   if (promoted && p.shown === 'Q') text += '=Q';
   if (revealed && !promoted) text += ` (${p.type}!)`;
   if (m.traitor) text = '🗡 ' + text;
