@@ -62,7 +62,6 @@ function newGame(twists = {}, rng = Math.random) {
       place(s, sq(f, homeRank(c)), c, back[f]);
       place(s, sq(f, pawnRank(c)), c, 'P');
     }
-    if (t.hiddenQueen) s.board[sq(3, homeRank(c))] = null; // the queen hides among the pawns instead
     if (t.bluff) shuffleArmy(s, c, rng);
   }
   if (t.objective) {
@@ -96,7 +95,7 @@ function shuffleArmy(s, c, rng = Math.random) {
   });
 }
 
-/** Hidden Queen: the chosen pawn secretly becomes the queen (still shown as a pawn). */
+/** Secret Queen: on top of the normal queen, the chosen pawn secretly becomes a second queen (still shown as a pawn). */
 function setHiddenQueen(s, c, i) {
   const p = s.board[i];
   if (!s.twists.hiddenQueen || !p || p.owner !== c || p.shown !== 'P') return false;
@@ -261,12 +260,13 @@ function applyMove(s, m, ctrl) {
   }
   // Short algebraic-style notation based on what the opponent can see.
   let text;
+  const seen = revealed && !promoted ? p.type : shownBefore;
   if (m.castle) text = m.castle === 'K' ? 'O-O' : 'O-O-O';
-  else if (!shownBefore) text = `?${sqName(m.from)}${victim ? 'x' : '–'}${sqName(m.to)}`;
-  else if (shownBefore === 'P') text = `${victim ? FILES[fileOf(m.from)] + 'x' : ''}${sqName(m.to)}`;
-  else text = `${shownBefore}${victim ? 'x' : ''}${sqName(m.to)}`;
+  else if (!seen) text = `?${sqName(m.from)}${victim ? 'x' : '–'}${sqName(m.to)}`;
+  else if (seen === 'P') text = `${victim ? FILES[fileOf(m.from)] + 'x' : ''}${sqName(m.to)}`;
+  else text = `${seen}${victim ? 'x' : ''}${sqName(m.to)}`;
   if (promoted && p.shown === 'Q') text += '=Q';
-  if (revealed && !promoted) text += ` (${p.type}!)`;
+  if (revealed && !promoted) text += ' (revealed)';
   if (m.traitor) text = '🗡 ' + text;
   s.lastMove = { from: m.from, to: m.to };
   return { text, victim };

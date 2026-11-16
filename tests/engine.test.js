@@ -41,7 +41,7 @@ test('en passant', () => {
 
 test('hidden queen moves like a pawn while disguised, then reveals', () => {
   const s = E.newGame({ hiddenQueen: true });
-  eq(s.board[S('d1')], null);
+  eq(s.board[S('d1')].type, 'Q', 'normal queen stays on d1');
   ok(E.setHiddenQueen(s, 'w', S('e2')));
   const q = s.board[S('e2')];
   eq(q.type, 'Q'); eq(q.shown, 'P');
@@ -50,7 +50,7 @@ test('hidden queen moves like a pawn while disguised, then reveals', () => {
   mv(s, 'a7', 'a6');
   mv(s, 'e4', 'h7'); // diagonal capture far away: only a queen could
   eq(q.shown, 'Q');
-  ok(s.history[2].text.includes('(Q!)'));
+  eq(s.history[2].text, 'Qxh7 (revealed)');
 });
 
 test('traitor moves an enemy piece once', () => {

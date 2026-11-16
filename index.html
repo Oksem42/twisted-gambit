@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Twisted Gambit</title>
-  <meta name="description" content="Chess with secret twists: Hidden Queen, Traitor, Hidden Objective, Bluff Moves and Secret Swap.">
+  <meta name="description" content="Chess with secret twists: Secret Queen, Traitor, Hidden Objective and Secret Swap. Play on one device or online.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♞</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -17,6 +17,7 @@
     <nav class="side-nav">
       <button class="side-item active" data-nav="play"><span class="si-ic" id="nav-ic-play"></span><span>Play</span></button>
       <button class="side-item" data-nav="new"><span class="si-ic plus">+</span><span>New Game</span></button>
+      <button class="side-item" data-nav="online"><span class="si-ic globe">🌐</span><span>Play Online</span></button>
       <button class="side-item" data-nav="rules"><span class="si-ic book">?</span><span>Rules</span></button>
       <a class="side-item" href="https://github.com/Oksem42/twisted-gambit" target="_blank" rel="noopener"><span class="si-ic code">&lt;/&gt;</span><span>Source</span></a>
     </nav>
@@ -42,6 +43,8 @@
   <div id="modal" class="modal-backdrop hidden"></div>
   <div id="drag-ghost" class="pc drag-ghost hidden"></div>
 
+  <!-- PeerJS (MIT) connects two browsers directly for online play -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="js/engine.js"></script>
   <script src="js/pieces.js"></script>
   <script src="js/ui.js"></script>
