@@ -874,6 +874,14 @@ function openLobby() {
   modal.classList.remove('hidden');
 }
 
+// Invite links always point at the public site, so they work for friends even if you opened the game from a file.
+const PUBLIC_URL = 'https://oksem42.github.io/twisted-gambit/';
+function inviteLink(code) {
+  const here = location.protocol.startsWith('http') && !/^(localhost|127\.)/.test(location.hostname)
+    ? location.origin + location.pathname : PUBLIC_URL;
+  return `${here}?join=${code}`;
+}
+
 function renderLobby() {
   const n = ui.net;
   const mode = modeInfo(ui.gameMode);
@@ -884,10 +892,14 @@ function renderLobby() {
     body = `<div class="code-box">
         <div class="eyebrow">Your game code</div>
         <div class="code" id="game-code">${n.status === 'connecting' ? '·····' : esc(n.code)}</div>
-        <button class="btn small" data-lobby="copy" ${n.status === 'connecting' ? 'disabled' : ''}>Copy code</button>
+        <div class="invite ${n.status === 'connecting' ? 'hidden' : ''}">
+          <input id="invite-link" readonly value="${esc(inviteLink(n.code))}" aria-label="Invite link">
+          <button class="btn primary small" data-lobby="copy-link">Copy invite link</button>
+        </div>
+        ${navigator.share ? `<button class="btn small" data-lobby="share" ${n.status === 'connecting' ? 'disabled' : ''}>Share…</button>` : ''}
       </div>
       <p class="lobby-wait"><span class="spinner"></span>${n.status === 'connecting' ? 'Creating game…' : n.status === 'connected' ? 'Friend connected! Starting…' : 'Waiting for your friend to join…'}</p>
-      <p class="lobby-help">Send this code to your friend. They open Twisted Gambit, click <b>New Game → Play Online</b>, and enter it under <b>Join a game</b>. You'll play White in <b>${mode.icon} ${mode.name}</b>.</p>
+      <p class="lobby-help">Send the invite link to your friend. Clicking it joins your game straight away. (Or they can open Twisted Gambit, click <b>Play Online</b> and type the code.) You'll play White in <b>${mode.icon} ${mode.name}</b>.</p>
       <button class="btn" data-lobby="cancel">Cancel</button>`;
   } else if (n && n.role === 'guest' && n.status !== 'error' && n.status !== 'closed') {
     body = `<p class="lobby-wait"><span class="spinner"></span>Connecting to game <b>${esc(n.code)}</b>…</p>
@@ -924,8 +936,15 @@ function renderLobby() {
       netJoin(code); renderLobby();
     }
     if (a === 'cancel') { netTeardown(); renderLobby(); }
-    if (a === 'copy') {
-      try { navigator.clipboard.writeText(ui.net.code); b.textContent = 'Copied!'; } catch { b.textContent = ui.net.code; }
+    if (a === 'copy-link') {
+      const input = $('invite-link');
+      input.select();
+      Promise.resolve().then(() => navigator.clipboard.writeText(input.value))
+        .then(() => { b.textContent = 'Copied!'; })
+        .catch(() => { document.execCommand('copy'); b.textContent = 'Copied!'; });
+    }
+    if (a === 'share') {
+      navigator.share({ title: 'Twisted Gambit', text: 'Play chess with secrets against me!', url: inviteLink(ui.net.code) }).catch(() => {});
     }
   }));
   const jc = $('join-code');
@@ -985,5 +1004,15 @@ window.addEventListener('beforeunload', () => { try { if (ui.net && ui.net.peer)
 window.__tg = { E, get G() { return G; }, ui };
 
 render();
-openNewGame();
+// Opening an invite link (?join=CODE) jumps straight into that game.
+const joinCode = (new URLSearchParams(location.search).get('join') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+if (joinCode.length === 5 && netAvailable()) {
+  history.replaceState(null, '', location.pathname);
+  ui.lobbyOpen = true;
+  modal.classList.remove('hidden');
+  netJoin(joinCode);
+  renderLobby();
+} else {
+  openNewGame();
+}
 })();

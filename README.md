@@ -28,8 +28,8 @@ With hidden pieces, the game judges everything using each piece's true identity,
 No install, no build step: **double-click `index.html`** and it opens in your browser.
 
 - **Pass & Play:** two players on one device. A privacy screen hides the board between turns.
-- **Play Online:** click *Play Online → Create Game* to get a 5-letter code and send it to a friend.
-  They open the game, click *Play Online*, and enter the code under *Join a game*. The creator plays White.
+- **Play Online:** click *Play Online → Create Game*, then *Copy invite link* and send it to a friend.
+  Clicking the link joins your game instantly (or they can type the 5-letter code under *Join a game*). The creator plays White.
   Both players need the game (the files, or a hosted copy) and an internet connection.
 
 Online play uses [PeerJS](https://peerjs.com) (MIT) to connect the two browsers directly. PeerJS's free public server only introduces the players to each other. Both browsers hold the full game state, so a player who opens the browser's developer tools could peek at secrets. It's built for friendly games.
