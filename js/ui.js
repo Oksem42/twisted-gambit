@@ -11,7 +11,7 @@ const MODES = [
   { key: 'traitor', name: 'Traitor', icon: '🗡',
     desc: 'Secretly mark one enemy piece. Once per game, take control of it for a single move, even to capture its own teammates.' },
   { key: 'objective', name: 'Hidden Objective', icon: '🎯',
-    desc: 'Each player draws a secret goal. Complete it, or capture the king, to win.' },
+    desc: 'Each player draws a secret goal. Complete it, or checkmate the king, to win.' },
   { key: 'swap', name: 'Secret Swap', icon: '⇄',
     desc: 'Once per game, swap the identities of two of your pieces. To your opponent they keep their old look.' },
 ];
@@ -49,7 +49,7 @@ function sound(kind) {
   if (!ui.sound) return;
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]] }[kind];
+    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]], check: [[660, 660, 0], [880, 880, 0.08]] }[kind];
     for (const [f0, f1, delay] of tones) {
       const t = actx.currentTime + delay;
       const o = actx.createOscillator(), g = actx.createGain();
@@ -211,7 +211,7 @@ function applyRemote(a) {
       case 'move': {
         const before = capturesNow();
         E.makeMove(G, a.move);
-        sound(capturesNow() > before ? 'capture' : 'move');
+        sound(G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
         ui.fresh = a.move.to;
         return afterAction();
       }
@@ -286,6 +286,7 @@ function renderBoard() {
       let inner = '';
       if (col === 0) inner += `<span class="coord rank">${r + 1}</span>`;
       if (row === 7) inner += `<span class="coord file">${E.FILES[f]}</span>`;
+      if (p && p.type === 'K' && G.check === p.owner && ui.phase !== 'menu') cls.push('incheck');
       if (p) inner += pieceHTML(p, ui.fresh === i ? 'fresh' : '');
       const m = targets.get(i);
       if (m) inner += p || m.ep ? '<span class="ring"></span>' : '<span class="dot"></span>';
@@ -338,6 +339,23 @@ function renderBar(el, c) {
     <div class="clock" data-c="${c}"><span class="ci">⏱</span><span class="ct">${fmt(ui.clock[c])}</span></div>`;
 }
 
+function renderPromo() {
+  const el = $('promo');
+  if (!ui.promo) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const m = ui.promo;
+  const color = G.board[m.from].owner;
+  const flip = (ui.viewer === B) !== ui.flipped;
+  const col = flip ? 7 - E.fileOf(m.to) : E.fileOf(m.to);
+  const row = flip ? E.rankOf(m.to) : 7 - E.rankOf(m.to);
+  el.style.left = `${col * 12.5}%`;
+  el.style.top = row === 0 ? '0' : 'auto';
+  el.style.bottom = row === 0 ? 'auto' : '0';
+  el.classList.toggle('up', row !== 0);
+  el.innerHTML = E.PROMOTIONS.map((t) => `<button data-promo="${t}" title="${PIECE_NAME[t]}">${pieceSVG(t, color)}</button>`).join('')
+    + '<button data-promo="x" class="x" title="Cancel">✕</button>';
+  el.classList.remove('hidden');
+}
+
 function render() {
   const bottom = ui.flipped ? other(ui.viewer) : ui.viewer;
   renderBoard();
@@ -345,6 +363,7 @@ function render() {
   renderBar($('bar-top'), other(bottom));
   renderPanel();
   renderBoardModal();
+  renderPromo();
   updateClocks();
 }
 function refresh() { if (ui.lobbyOpen) renderLobby(); else render(); }
@@ -422,7 +441,7 @@ function playCard() {
     return `<div class="card"><h3>${ui.online ? '<span class="spinner"></span>' : ''}${msg}</h3>
       ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
   }
-  let hint = 'Click or drag a piece to move. Capture the king to win.';
+  let hint = G.check === c ? '<b class="check-txt">Check!</b> You must get your king out of check.' : 'Click or drag a piece to move. Checkmate the king to win.';
   let actions = '';
   if (ui.tool === 'traitor') {
     hint = 'Your traitor is the highlighted enemy piece. Make one move with it.';
@@ -433,7 +452,7 @@ function playCard() {
   } else {
     const btns = [];
     if (traitorReady(c)) btns.push('<button class="btn" data-act="traitor">🗡 Use Traitor</button>');
-    if (G.twists.swap && !G.swapUsed[c]) btns.push('<button class="btn" data-act="swap">⇄ Secret Swap</button>');
+    if (E.canSwap(G, c)) btns.push('<button class="btn" data-act="swap">⇄ Secret Swap</button>');
     if (btns.length) actions = `<div class="btn-row">${btns.join('')}</div>`;
   }
   return `<div class="card"><h3><span class="dotlive"></span>${ui.online ? 'Your move' : `${nm(c)} to move`}</h3><p>${hint}</p>${actions}
@@ -442,7 +461,7 @@ function playCard() {
 
 function resultText() {
   const r = G.result;
-  return r.winner ? `${nm(r.winner)} ${r.reason}.` : 'The game ended in a draw.';
+  return r.winner ? `${nm(r.winner)} ${r.reason}.` : `Draw by ${r.reason}.`;
 }
 
 function overCard() {
@@ -528,7 +547,7 @@ function renderBoardModal() {
   boardModal.innerHTML = `<div class="go-card" role="dialog" aria-label="Game over">
       <div class="go-head ${r.winner && (!ui.online || r.winner === ui.viewer) ? '' : 'draw'}">
         <button class="btn ghost small x" data-bm="close" aria-label="Close">✕</button>
-        <h2>${title}</h2><p>${r.winner ? esc(r.reason.replace(/^wins /, '')) : 'by agreement'}</p>
+        <h2>${title}</h2><p>${r.winner ? esc(r.reason.replace(/^won /, '')) : 'by ' + esc(r.reason)}</p>
       </div>
       <div class="go-players">
         <div class="go-player ${r.winner === W ? 'won' : ''}">${avatar(W)}<span>${nm(W)}</span></div>
@@ -541,6 +560,15 @@ function renderBoardModal() {
       </div></div>`;
   boardModal.classList.remove('hidden');
 }
+
+$('promo').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-promo]');
+  if (!b || !ui.promo) return;
+  const m = ui.promo;
+  ui.promo = null;
+  if (b.dataset.promo === 'x') return render();
+  doMove({ ...m, promo: b.dataset.promo });
+});
 
 boardModal.addEventListener('click', (e) => {
   const b = e.target.closest('[data-bm]');
@@ -573,6 +601,7 @@ function handoff(color, purpose = 'turn') {
   let msg = 'Your move. Make sure your opponent isn\'t looking.';
   if (purpose === 'setup') msg = 'Time for your secret setup. Make sure your opponent isn\'t looking.';
   else if (ui.phase === 'play' && G.ply === 0) msg = 'Setup is done. The game begins. White moves first.';
+  else if (G.check === color) msg = 'You\'re in check! Make sure your opponent isn\'t looking.';
   overlay.innerHTML = `<div class="pass-card">
       <div class="big-piece">${pieceSVG('K', color)}</div>
       <h2>Pass to ${nm(color)}</h2><p>${msg}</p>
@@ -640,12 +669,14 @@ function gameOver() {
 function capturesNow() { return G.captured.w.length + G.captured.b.length; }
 
 function doMove(m) {
+  if (m.promo === true) { ui.promo = m; return render(); } // ask which piece first
+  ui.promo = null;
   const before = capturesNow();
   const revealedBefore = G.board.filter((p) => p && p.shown === p.type).length;
   try { E.makeMove(G, m); } catch (e) { ui.flash = e.message; return render(); }
-  sendAct({ kind: 'move', move: { from: m.from, to: m.to, traitor: !!m.traitor } });
+  sendAct({ kind: 'move', move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined } });
   const revealed = G.board.filter((p) => p && p.shown === p.type).length > revealedBefore;
-  sound(revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
+  sound(G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
   ui.fresh = m.to;
   ui.flash = '';
   afterAction();
@@ -686,6 +717,7 @@ boardEl.addEventListener('pointerdown', (e) => {
   if (!el) return;
   e.preventDefault();
   const i = +el.dataset.sq;
+  if (ui.promo) { ui.promo = null; return render(); }
   if (ui.phase === 'secret') {
     const step = currentStep();
     if (step === 'hiddenQueen') E.setHiddenQueen(G, ui.viewer, i);
@@ -909,15 +941,22 @@ function openRules() {
     <div class="modal-head"><h2>📖 Rules</h2><button class="btn ghost small" data-close>✕</button></div>
     <div class="modal-body">
       <h4>Base game</h4>
-      <p>Normal chess moves, castling, en passant and promotion (to queen). There is no check or checkmate:
-      <b>you win by capturing the enemy king</b>. Leaving your king en prise is a gamble you're allowed to take.
+      <p>Full standard chess rules, the same as chess.com: <b>checkmate wins</b>. You can never make a move that
+      leaves your own king in check, so pinned pieces stay put and kings can't stand next to each other.
       Each game mode adds one secret twist.</p>
+      <ul>
+        <li><b>Castling:</b> the king and rook haven't moved, the squares between are empty, and the king isn't in check, doesn't pass through an attacked square, and doesn't land on one.</li>
+        <li><b>En passant:</b> a pawn that just moved two squares can be captured as if it moved one, but only on the very next move.</li>
+        <li><b>Promotion:</b> a pawn reaching the last rank becomes a queen, rook, bishop or knight (your choice).</li>
+        <li><b>Draws:</b> stalemate, threefold repetition, the 50-move rule (50 moves each with no capture or pawn move), insufficient material, or agreement. These are declared automatically.</li>
+        <li><b>Hidden pieces and check:</b> the game judges with every piece's true identity. A disguised piece that gives check is revealed immediately.</li>
+      </ul>
       ${MODES.map((m) => `<h4>${m.icon} ${m.name}</h4><p>${m.desc}</p>`).join('')}
       <h4>Details</h4>
       <ul>
         <li><b>Secret Queen:</b> a disguised queen can make pawn moves (including the two-square first move) without being revealed. If it reaches the last rank it's revealed.</li>
-        <li><b>Traitor:</b> using it takes your whole turn. If the traitor is captured first, the power is lost.</li>
-        <li><b>Secret Swap:</b> takes your turn. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
+        <li><b>Traitor:</b> using it takes your whole turn. The traitor can't capture a king, and the move can't leave your own king in check. If the traitor is captured first, the power is lost.</li>
+        <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Pass &amp; play:</b> a privacy screen hides the board between turns so the next player can take the device.</li>
         <li><b>Online:</b> one player creates a game and shares the 5-letter code; the other joins with it. The creator plays White.</li>
       </ul>
