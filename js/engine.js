@@ -55,7 +55,7 @@ function newGame(twists = {}, rng = Math.random) {
     objectives: { w: null, b: null }, hiddenQueen: { w: null, b: null },
     result: null, lastMove: null, ply: 0, halfmove: 0, positions: {}, check: null,
     mines: { w: [], b: [] }, lastExplosion: null, shifter: { w: null, b: null },
-    prophecy: { w: null, b: null }, bonusPending: null, bonusNow: null,
+    prophecy: { w: null, b: null }, bonusPending: null, bonusNow: null, turns: { w: 0, b: 0 },
   };
   const back = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
   for (const c of [W, B]) {
@@ -145,6 +145,20 @@ function tripMine(s, at, piece) {
   s.board[at] = null;
   s.captured[owner].push({ type: piece.type, by: 'mine', owner: piece.owner });
   return 'exploded';
+}
+
+/** Prophecy recharges: usable when unused, or PROPHECY_RECHARGE turns after the last one was made. */
+const PROPHECY_RECHARGE = 5;
+function prophecyReady(s, c) {
+  if (!s.twists.prophecy) return false;
+  const pr = s.prophecy[c];
+  return !pr || (pr.state !== 'active' && s.turns[c] + 1 >= pr.readyOnTurn);
+}
+/** Turns until the prophecy can be used again (0 = ready now). */
+function prophecyWait(s, c) {
+  const pr = s.prophecy[c];
+  if (!pr || pr.state === 'active') return 0;
+  return Math.max(0, pr.readyOnTurn - (s.turns[c] + 1));
 }
 
 function findById(s, id) {
@@ -499,14 +513,17 @@ function makeMove(s, move) {
   if (takeBonus && !keep) addNote(entry, '🔮 bonus move forfeited');
   s.turn = keep ? me : foe;
   if (keep) s.bonusNow = me;
+  else s.turns[me]++; // a whole turn is over (a bonus double move counts as one turn)
   s.ply++;
   afterTurn(s, entry);
 
   // Make a prophecy about the opponent's reply (once per game).
   const guess = move.prophecy;
-  if (guess && s.twists.prophecy && !s.prophecy[me] && !s.result && s.turn === foe
+  // (s.turns[me] already counts this turn, so "+1" undoes that for the readiness check)
+  if (guess && s.twists.prophecy && s.turn === foe && !s.result
+      && (!s.prophecy[me] || (s.prophecy[me].state !== 'active' && s.turns[me] >= s.prophecy[me].readyOnTurn))
       && legalMoves(s, guess.from).some((m) => m.to === guess.to)) {
-    s.prophecy[me] = { from: guess.from, to: guess.to, state: 'active' };
+    s.prophecy[me] = { from: guess.from, to: guess.to, state: 'active', readyOnTurn: s.turns[me] + PROPHECY_RECHARGE };
   }
 }
 
@@ -523,6 +540,7 @@ function doSwap(s, a, b) {
     if (p.type === 'P' && rankOf(i) === lastRank(me)) { p.type = 'Q'; s.stats[me].promotions++; }
   }
   s.swapUsed[me] = true;
+  s.turns[me]++;
   s.ep = null;
   s.halfmove++;
   s.lastMove = null;
@@ -538,7 +556,7 @@ function agreeDraw(s) { end(s, null, 'agreement'); }
 
 globalThis.TGEngine = {
   W, B, other, FILES, sq, fileOf, rankOf, sqName, PIECE_NAME, PIECE_VALUE, PROMOTIONS, OBJECTIVES, objectiveById,
-  newGame, setHiddenQueen, setTraitor, toggleMine, setMines, setShifter, MINES, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
+  newGame, prophecyReady, prophecyWait, PROPHECY_RECHARGE, setHiddenQueen, setTraitor, toggleMine, setMines, setShifter, MINES, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
   resign, agreeDraw, positionKey, insufficientMaterial,
 };
 })();

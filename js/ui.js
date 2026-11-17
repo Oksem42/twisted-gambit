@@ -17,7 +17,7 @@ const MODES = [
   { key: 'mines', name: 'Landmine', icon: '💣',
     desc: "Each player secretly plants 2 mines in the opponent's half. Any enemy piece except the king that lands on one is blown up." },
   { key: 'prophecy', name: 'Prophecy', icon: '🔮',
-    desc: "Once per game, after your move, secretly predict your opponent's reply. If they play exactly that, you get a double move." },
+    desc: "After your move, secretly predict your opponent's reply. If they play exactly that, you get a double move. Recharges 5 turns after each use." },
   { key: 'shifter', name: 'Shapeshifter', icon: '🦎',
     desc: 'Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look.' },
 ];
@@ -272,7 +272,8 @@ function applyRemote(a) {
         const before = capturesNow();
         E.makeMove(G, a.move);
         sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
-        ui.fresh = a.move.to;
+        ui.fresh = null;
+        ui.anim = slidesFor(a.move);
         return afterAction();
       }
       case 'swap': E.doSwap(G, a.a, a.b); sound('reveal'); return afterAction();
@@ -389,8 +390,10 @@ function publicChips(c) {
   if (t.objective) return '<span class="chip" title="Secret objective">🎯 objective</span>';
   if (t.mines) return `<span class="chip ${G.mines[c].length ? '' : 'spent'}" title="Hidden mines left">💣 ×${G.mines[c].length}</span>`;
   if (t.prophecy) {
-    const pr = G.prophecy[c];
-    return `<span class="chip ${pr && pr.state !== 'active' ? 'spent' : ''}" title="Prophecy">🔮 prophecy</span>`;
+    const wait = E.prophecyWait(G, c);
+    return wait
+      ? `<span class="chip spent-soft" title="Prophecy recharging">🔮 in ${wait}</span>`
+      : '<span class="chip" title="Prophecy">🔮 prophecy</span>';
   }
   if (t.shifter) {
     const id = G.shifter[c];
@@ -437,9 +440,42 @@ function renderPromo() {
   el.classList.remove('hidden');
 }
 
+// Sliding move animation (chess.com style): after the board re-renders, each moved piece
+// is drawn back at its old square and glides to the new one.
+const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+function slidesFor(move) {
+  const out = [{ from: move.from, to: move.to }];
+  const p = G.board[move.to];
+  if (p && p.type === 'K' && Math.abs(E.fileOf(move.to) - E.fileOf(move.from)) === 2) { // castling: the rook moves too
+    const r = E.rankOf(move.from), kingside = E.fileOf(move.to) === 6;
+    out.push({ from: E.sq(kingside ? 7 : 0, r), to: E.sq(kingside ? 5 : 3, r) });
+  }
+  return out;
+}
+function runSlides() {
+  const list = ui.anim;
+  ui.anim = null;
+  if (!list || reduceMotion()) return;
+  for (const { from, to } of list) {
+    const fromEl = boardEl.querySelector(`[data-sq="${from}"]`);
+    const toEl = boardEl.querySelector(`[data-sq="${to}"]`);
+    const pc = toEl && toEl.querySelector('.pc');
+    if (!fromEl || !pc || !pc.animate) continue; // e.g. the piece was blown up by a mine
+    const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+    pc.classList.remove('fresh');
+    pc.style.zIndex = '20';
+    const anim = pc.animate(
+      [{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: 'translate(0, 0)' }],
+      { duration: 170, easing: 'cubic-bezier(.25,.75,.4,1)' },
+    );
+    anim.onfinish = anim.oncancel = () => { pc.style.zIndex = ''; };
+  }
+}
+
 function render() {
   const bottom = ui.flipped ? other(ui.viewer) : ui.viewer;
   renderBoard();
+  runSlides();
   renderBar($('bar-bottom'), bottom);
   renderBar($('bar-top'), other(bottom));
   renderPanel();
@@ -485,7 +521,11 @@ function secretItems(c) {
   }
   if (t.prophecy) {
     const pr = G.prophecy[c];
-    const txt = !pr ? 'ready: use it on your turn' : pr.state === 'active' ? `waiting: you predicted ${E.sqName(pr.from)} → ${E.sqName(pr.to)}` : pr.state === 'hit' ? 'came true!' : 'missed';
+    const wait = E.prophecyWait(G, c);
+    const again = wait ? ` Ready again in ${wait} turn${wait === 1 ? '' : 's'}.` : ' Ready to use again.';
+    const txt = !pr ? 'ready: use it on your turn'
+      : pr.state === 'active' ? `waiting: you predicted ${E.sqName(pr.from)} → ${E.sqName(pr.to)}`
+      : (pr.state === 'hit' ? 'last one came true!' : 'last one missed.') + again;
     items.push(`<li><span class="ic">🔮</span><div>Prophecy: <b>${txt}</b></div></li>`);
   }
   if (t.shifter) {
@@ -575,7 +615,7 @@ function playCard() {
     const btns = [];
     if (traitorReady(c)) btns.push('<button class="btn" data-act="traitor">🗡 Use Traitor</button>');
     if (E.canSwap(G, c)) btns.push('<button class="btn" data-act="swap">⇄ Secret Swap</button>');
-    if (G.twists.prophecy && !G.prophecy[c] && G.bonusPending !== c && G.bonusNow !== c) btns.push('<button class="btn" data-act="prophecy">🔮 Use Prophecy</button>');
+    if (E.prophecyReady(G, c) && G.bonusPending !== c && G.bonusNow !== c) btns.push('<button class="btn" data-act="prophecy">🔮 Use Prophecy</button>');
     if (btns.length) actions = `<div class="btn-row">${btns.join('')}</div>`;
   }
   return `<div class="card"><h3><span class="dotlive"></span>${ui.online ? 'Your move' : `${nm(c)} to move`}</h3><p>${hint}</p>${actions}
@@ -796,8 +836,8 @@ function gameOver() {
 
 function capturesNow() { return G.captured.w.length + G.captured.b.length; }
 
-function doMove(m) {
-  if (m.promo === true) { ui.promo = m; return render(); } // ask which piece first
+function doMove(m, dropped = false) {
+  if (m.promo === true) { ui.promo = m; return render(); } // ask which piece first (the drop is undone, so animate after)
   ui.promo = null;
   if (ui.tool === 'prophecy' && !m.prophecy) {
     // Show the board after this move and let the player predict the reply before anything is sent.
@@ -806,7 +846,8 @@ function doMove(m) {
     if (!preview.result && preview.turn !== G.turn) {
       ui.predict = { realG: G, move: m, guess: null };
       G = preview;
-      ui.selected = null; ui.moves = []; ui.fresh = m.to;
+      ui.selected = null; ui.moves = []; ui.fresh = null;
+      ui.anim = dropped ? null : slidesFor(m);
       return render();
     }
     ui.tool = null;
@@ -817,7 +858,8 @@ function doMove(m) {
   sendAct({ kind: 'move', move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined, prophecy: m.prophecy || undefined } });
   const revealed = G.board.filter((p) => p && p.shown === p.type).length > revealedBefore;
   sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
-  ui.fresh = m.to;
+  ui.fresh = dropped ? m.to : null;
+  ui.anim = dropped ? null : slidesFor(m);
   ui.flash = '';
   afterAction();
 }
@@ -917,7 +959,7 @@ window.addEventListener('pointerup', (e) => {
   if (!d.moved) return;
   const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.sq');
   const m = el && ui.moves.find((x) => x.to === +el.dataset.sq);
-  if (m) doMove(m);
+  if (m) doMove(m, m.promo !== true); // dragged pieces are already in place: no slide
   else render();
 });
 
@@ -950,7 +992,7 @@ panel.addEventListener('click', (e) => {
     case 'predict-ok': {
       const { realG, move, guess } = ui.predict;
       G = realG; ui.predict = null; ui.tool = null;
-      return doMove({ ...move, prophecy: guess });
+      return doMove({ ...move, prophecy: guess }, true); // the preview already showed this move
     }
     case 'predict-cancel':
       G = ui.predict.realG; ui.predict = null; ui.tool = null; ui.fresh = null; ui.selected = null; ui.moves = [];
@@ -1146,7 +1188,7 @@ function openRules() {
         <li><b>Secret Queen:</b> a disguised queen can make pawn moves (including the two-square first move) without being revealed. If it reaches the last rank it's revealed.</li>
         <li><b>Traitor:</b> using it takes your whole turn. The traitor can't capture a king, and the move can't leave your own king in check. If the traitor is captured first, the power is lost.</li>
         <li><b>Landmine:</b> mines can go on any square in the opponent's half. A mine is used up when it goes off. If blowing up a piece would leave its own king in check, the mine fizzles instead and the piece survives.</li>
-        <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check.</li>
+        <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check. After using it, it recharges for 5 of your turns.</li>
         <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Pass &amp; play:</b> a privacy screen hides the board between turns so the next player can take the device.</li>

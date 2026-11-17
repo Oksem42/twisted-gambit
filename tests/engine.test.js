@@ -284,14 +284,27 @@ test('a correct prophecy grants a double move', () => {
   ok(s.history[3].note.includes('bonus move'));
 });
 
-test('a wrong prophecy gives nothing and is used up', () => {
+test('a wrong prophecy gives nothing and must recharge', () => {
   const s = E.newGame({ prophecy: true });
   mv(s, 'e2', 'e4', { prophecy: { from: S('e7'), to: S('e5') } });
   mv(s, 'd7', 'd5');
   eq(s.prophecy.w.state, 'miss');
+  ok(!E.prophecyReady(s, 'w'), 'recharging');
   mv(s, 'g1', 'f3', { prophecy: { from: S('a7'), to: S('a6') } });
-  eq(s.turn, 'b');
-  eq(s.prophecy.w.state, 'miss', 'only one prophecy per game');
+  eq(s.prophecy.w.state, 'miss', 'ignored while recharging');
+});
+
+test('prophecy recharges 5 turns after it was used', () => {
+  const s = E.newGame({ prophecy: true });
+  mv(s, 'e2', 'e4', { prophecy: { from: S('e7'), to: S('e5') } }); // white turn 1: used
+  mv(s, 'd7', 'd5');
+  const shuffle = [['g1', 'f3'], ['g8', 'f6'], ['b1', 'c3'], ['b8', 'c6'], ['c3', 'b1'], ['c6', 'b8'], ['f3', 'g1'], ['f6', 'g8']];
+  const waits = [];
+  for (const [f, t] of shuffle) { if (s.turn === 'w') waits.push(E.prophecyWait(s, 'w')); mv(s, f, t); }
+  eq(waits.join(), '4,3,2,1', 'counts down on white turns 2-5');
+  ok(E.prophecyReady(s, 'w'), 'ready again on white turn 6');
+  mv(s, 'a2', 'a3', { prophecy: { from: S('a7'), to: S('a6') } });
+  eq(s.prophecy.w.state, 'active', 'a new prophecy can be made');
 });
 
 test('the bonus move is lost if the first move gives check', () => {

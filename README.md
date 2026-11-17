@@ -11,7 +11,7 @@ Chess with secrets. Pick a game mode, then play a friend on the same device (pas
 | 🎯 **Hidden Objective** | Each player draws a secret goal (e.g. *capture both enemy knights*, *land a knight on the enemy back rank*). Complete it, or checkmate the king, to win. |
 | ⇄ **Secret Swap** | Once per game, swap the true identities of two of your pieces. To your opponent they keep their old look until one moves in a way its disguise couldn't. |
 | 💣 **Landmine** | Each player secretly plants 2 mines in the opponent's half. Any enemy piece except the king that lands on one is blown up. (If the blast would expose that piece's own king, the mine fizzles instead.) |
-| 🔮 **Prophecy** | Once per game, after your move, secretly predict your opponent's reply. If they play exactly that, your next turn is a double move (lost if the first move gives check). |
+| 🔮 **Prophecy** | After your move, secretly predict your opponent's reply. If they play exactly that, your next turn is a double move (lost if the first move gives check). Recharges 5 turns after each use. |
 | 🦎 **Shapeshifter** | Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look until it moves in a way that look couldn't, or gives check. |
 
 ## Base rules
