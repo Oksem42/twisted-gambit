@@ -1,5 +1,5 @@
 (function () {
-// Original SVG piece set for Twisted Gambit (chunky, flat, outlined).
+// Original SVG piece set for Gerasimos Gambit (chunky, flat, outlined).
 // viewBox 0 0 100 100. Each piece is a list of shapes; `detail` shapes use the accent stroke.
 
 const BASE = '<rect x="22" y="76" width="56" height="12" rx="5"/>';

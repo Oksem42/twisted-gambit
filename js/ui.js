@@ -957,7 +957,7 @@ function renderLobby() {
         ${navigator.share ? `<button class="btn small" data-lobby="share" ${n.status === 'connecting' ? 'disabled' : ''}>Share…</button>` : ''}
       </div>
       <p class="lobby-wait"><span class="spinner"></span>${n.status === 'connecting' ? 'Creating game…' : n.status === 'connected' ? 'Friend connected! Starting…' : 'Waiting for your friend to join…'}</p>
-      <p class="lobby-help">Send the invite link to your friend. Clicking it joins your game straight away. (Or they can open Twisted Gambit, click <b>Play Online</b> and type the code.) You'll play White in <b>${mode.icon} ${mode.name}</b>.</p>
+      <p class="lobby-help">Send the invite link to your friend. Clicking it joins your game straight away. (Or they can open Gerasimos Gambit, click <b>Play Online</b> and type the code.) You'll play White in <b>${mode.icon} ${mode.name}</b>.</p>
       <button class="btn" data-lobby="cancel">Cancel</button>`;
   } else if (n && n.role === 'guest' && n.status !== 'error' && n.status !== 'closed') {
     body = `<p class="lobby-wait"><span class="spinner"></span>Connecting to game <b>${esc(n.code)}</b>…</p>
@@ -1005,7 +1005,7 @@ function renderLobby() {
         .catch(() => { document.execCommand('copy'); b.textContent = 'Copied!'; });
     }
     if (a === 'share') {
-      navigator.share({ title: 'Twisted Gambit', text: 'Play chess with secrets against me!', url: inviteLink(ui.net.code) }).catch(() => {});
+      navigator.share({ title: 'Gerasimos Gambit', text: 'Play chess with secrets against me!', url: inviteLink(ui.net.code) }).catch(() => {});
     }
   }));
   const jc = $('join-code');

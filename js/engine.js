@@ -1,5 +1,5 @@
 (function () {
-// Twisted Gambit — rules engine.
+// Gerasimos Gambit — rules engine.
 // Pure game logic, no DOM. Full standard chess rules (check, checkmate, stalemate, castling
 // restrictions, en passant, promotion choice, threefold repetition, 50-move rule, insufficient
 // material) plus the secret twists. The engine always judges with the pieces' TRUE identities,

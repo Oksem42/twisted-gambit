@@ -1,4 +1,4 @@
-# ♞ Twisted Gambit
+# ♞ Gerasimos Gambit
 
 Chess with secrets. Pick a game mode, then play a friend on the same device (pass & play) or online.
 
