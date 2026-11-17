@@ -56,7 +56,6 @@ a { color: inherit; }
 .si-ic svg { width: 26px; height: 26px; }
 .si-ic.plus { background: var(--green); color: #fff; font-size: 22px; }
 .si-ic.book { background: #4b8fd8; color: #fff; }
-.si-ic.code { background: #7d55c7; color: #fff; font-size: 10px; }
 .si-ic.snd { font-size: 16px; }
 .side-foot { margin-top: auto; padding: 12px 0 10px; display: flex; flex-direction: column; gap: 6px; }
 .side-cta { margin: 0 12px; }
@@ -353,7 +352,6 @@ a { color: inherit; }
   .logo-mark { width: 30px; height: 30px; }
   .logo-text, .logo-text b { font-size: 15px; }
   .side-nav .side-item { width: 40px; padding: 8px 0; }
-  .side-nav a.side-item { display: none; } /* Source link lives in the README */
   .si-ic { width: 24px; height: 24px; }
 }
 
