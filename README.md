@@ -30,9 +30,10 @@ No install, no build step: **double-click `index.html`** and it opens in your br
 - **Pass & Play:** two players on one device. A privacy screen hides the board between turns.
 - **Play Online:** click *Play Online → Create Game*, then *Copy invite link* and send it to a friend.
   Clicking the link joins your game instantly (or they can type the 5-letter code under *Join a game*). The creator plays White.
+- **Find Opponent:** *Play Online → Find Opponent* matches you with any other player searching for the same mode.
   Both players need the game (the files, or a hosted copy) and an internet connection.
 
-Online play uses [PeerJS](https://peerjs.com) (MIT) to connect the two browsers directly. PeerJS's free public server only introduces the players to each other. Both browsers hold the full game state, so a player who opens the browser's developer tools could peek at secrets. It's built for friendly games.
+Online play uses [PeerJS](https://peerjs.com) (MIT) to connect the two browsers directly. PeerJS's free public server only introduces the players to each other. Random matchmaking works without a server of our own: each mode has a dozen numbered "waiting spots" (well-known peer IDs). A searching player claims the first free spot or connects to whoever is waiting there. Both browsers hold the full game state, so a player who opens the browser's developer tools could peek at secrets. It's built for friendly games.
 
 **Play it online:** https://oksem42.github.io/twisted-gambit/ (hosted with GitHub Pages; send friends this link).
 

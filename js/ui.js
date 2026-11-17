@@ -97,6 +97,7 @@ function netTeardown() {
   ui.net = null;
   ui.online = false;
   if (!n) return;
+  clearTimeout(n.timer);
   try { if (n.conn) n.conn.close(); } catch { /* ignore */ }
   try { if (n.peer) n.peer.destroy(); } catch { /* ignore */ }
 }
@@ -105,11 +106,55 @@ function netHost(mode) {
   const n = ui.net = { role: 'host', code: makeCode(), myColor: W, status: 'connecting', mode, oppName: null, error: '' };
   const peer = n.peer = new window.Peer(NET_PREFIX + n.code);
   peer.on('open', () => { if (ui.net === n) { n.status = 'waiting'; refresh(); } });
-  peer.on('connection', (conn) => {
-    if (ui.net !== n || (n.conn && n.conn.open)) { conn.on('open', () => conn.close()); return; }
-    bindConn(n, conn);
-  });
+  peer.on('connection', (conn) => acceptConn(n, conn));
   peer.on('error', (err) => netError(n, err));
+}
+function acceptConn(n, conn) {
+  if (ui.net !== n || ui.online || (n.conn && n.conn.open)) {
+    conn.on('open', () => { conn.send({ t: 'busy' }); setTimeout(() => conn.close(), 300); });
+    return;
+  }
+  bindConn(n, conn);
+}
+
+// ---- Random matchmaking, no server of our own: each mode has numbered "waiting spots" (well-known
+// peer IDs). Claim the first free spot and wait there, or connect to whoever is already waiting.
+const QUICK_SLOTS = 12;
+const slotId = (mode, slot) => `${NET_PREFIX}q-${mode}-${slot}`;
+function quickWait(mode, slot = 0) {
+  netTeardown();
+  const n = ui.net = { role: 'host', quick: true, code: `Q${slot + 1}`, myColor: W, status: 'searching', mode, slot, oppName: null, error: '' };
+  if (slot >= QUICK_SLOTS) {
+    n.status = 'error';
+    n.error = 'Matchmaking is full right now. Try again in a minute, or invite a friend with a link.';
+    return refresh();
+  }
+  n.onEarlyClose = () => { n.conn = null; n.status = 'waiting'; refresh(); }; // opponent left before starting: keep waiting
+  const peer = n.peer = new window.Peer(slotId(mode, slot));
+  peer.on('open', () => { if (ui.net === n) { n.status = 'waiting'; refresh(); } });
+  peer.on('connection', (conn) => acceptConn(n, conn));
+  peer.on('error', (err) => {
+    if (ui.net !== n) return;
+    if (err.type === 'unavailable-id') return quickJoin(mode, slot); // someone is waiting in this spot
+    netError(n, err);
+  });
+}
+function quickJoin(mode, slot) {
+  netTeardown();
+  const n = ui.net = { role: 'guest', quick: true, code: `Q${slot + 1}`, myColor: B, status: 'searching', mode, slot, oppName: null, error: '' };
+  const next = () => { if (ui.net === n && !ui.online) quickWait(mode, slot + 1); };
+  n.onEarlyClose = next;
+  n.timer = setTimeout(next, 8000); // the spot's owner didn't answer in time
+  const peer = n.peer = new window.Peer();
+  peer.on('open', () => {
+    if (ui.net !== n) return;
+    bindConn(n, peer.connect(slotId(mode, slot), { reliable: true, serialization: 'json' }));
+  });
+  peer.on('error', (err) => {
+    if (ui.net !== n) return;
+    if (err.type === 'peer-unavailable') return quickWait(mode, slot); // they just left: take the spot
+    netError(n, err);
+  });
 }
 function netJoin(code) {
   netTeardown();
@@ -130,7 +175,11 @@ function bindConn(n, conn) {
     refresh();
   });
   conn.on('data', (data) => { if (ui.net === n) onNet(typeof data === 'string' ? JSON.parse(data) : data); });
-  conn.on('close', () => { if (ui.net === n) { n.status = 'closed'; stopClock(); refresh(); } });
+  conn.on('close', () => {
+    if (ui.net !== n) return;
+    if (n.onEarlyClose && !ui.online) return n.onEarlyClose();
+    n.status = 'closed'; stopClock(); refresh();
+  });
 }
 function netError(n, err) {
   if (ui.net !== n) return;
@@ -152,6 +201,7 @@ const sendAct = (a) => { if (ui.online) send({ t: 'act', a }); };
 
 function onNet(m) {
   const n = ui.net;
+  if (m.t === 'busy') { if (n.onEarlyClose && !ui.online) n.onEarlyClose(); return; }
   if (m.t === 'hello') {
     n.oppName = String(m.name || 'Opponent').slice(0, 16);
     if (n.role === 'host') startOnlineGame(n.mode);
@@ -170,6 +220,7 @@ function startOnlineGame(mode) {
 }
 
 function beginOnline(mode, g, names) {
+  if (ui.net) { clearTimeout(ui.net.timer); ui.net.onEarlyClose = null; }
   G = g;
   ui.online = true;
   ui.lobbyOpen = false;
@@ -888,6 +939,13 @@ function renderLobby() {
   let body;
   if (!netAvailable()) {
     body = `<div class="card alert"><h3>Online play unavailable</h3><p>The online play library couldn't load. Check your internet connection and reload the page.</p></div>`;
+  } else if (n && n.quick && ['searching', 'waiting', 'connected'].includes(n.status)) {
+    body = `<div class="code-box">
+        <div class="eyebrow">Random opponent · ${mode.icon} ${mode.name}</div>
+        <p class="lobby-wait" style="justify-content:center;margin:14px 0 4px"><span class="spinner"></span>${n.status === 'connected' ? 'Opponent found! Starting…' : 'Looking for an opponent…'}</p>
+      </div>
+      <p class="lobby-help">You'll be matched with the next player who searches for <b>${mode.name}</b>. If nobody else is online it can take a while. You can also cancel and invite a friend with a link.</p>
+      <button class="btn" data-lobby="cancel">Cancel</button>`;
   } else if (n && n.role === 'host' && (n.status === 'connecting' || n.status === 'waiting' || n.status === 'connected')) {
     body = `<div class="code-box">
         <div class="eyebrow">Your game code</div>
@@ -908,6 +966,8 @@ function renderLobby() {
     body = `
       <div class="section-label">Your name</div>
       <div class="names one"><input id="my-name" maxlength="16" value="${esc(ui.myName)}" placeholder="Your name" aria-label="Your name"></div>
+      <div class="card quick-card"><div><h3>⚡ Play a random opponent</h3><p>Get matched with anyone else looking for a <b>${mode.icon} ${mode.name}</b> game.</p></div>
+        <button class="btn primary" data-lobby="quick">Find Opponent</button></div>
       <div class="online-grid">
         <div class="card"><h3>Create a game</h3><p>Get a code to send to a friend. Mode: <b>${mode.icon} ${mode.name}</b>.</p>
           <button class="btn primary" data-lobby="create">Create Game</button></div>
@@ -929,6 +989,7 @@ function renderLobby() {
   modal.querySelectorAll('[data-lobby]').forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.lobby;
     if (a === 'create') { saveName(); netHost(ui.gameMode); renderLobby(); }
+    if (a === 'quick') { saveName(); quickWait(ui.gameMode); renderLobby(); }
     if (a === 'join') {
       saveName();
       const code = ($('join-code').value || '').trim().toUpperCase();
@@ -977,7 +1038,7 @@ function openRules() {
         <li><b>Traitor:</b> using it takes your whole turn. The traitor can't capture a king, and the move can't leave your own king in check. If the traitor is captured first, the power is lost.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Pass &amp; play:</b> a privacy screen hides the board between turns so the next player can take the device.</li>
-        <li><b>Online:</b> one player creates a game and shares the 5-letter code; the other joins with it. The creator plays White.</li>
+        <li><b>Online:</b> create a game and send the invite link (or 5-letter code), or press <b>Find Opponent</b> to be matched with a random player in the same mode.</li>
       </ul>
     </div></div>`;
   modal.classList.remove('hidden');
