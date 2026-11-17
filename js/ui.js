@@ -14,6 +14,12 @@ const MODES = [
     desc: 'Each player draws a secret goal. Complete it, or checkmate the king, to win.' },
   { key: 'swap', name: 'Secret Swap', icon: '⇄',
     desc: 'Once per game, swap the identities of two of your pieces. To your opponent they keep their old look.' },
+  { key: 'mines', name: 'Landmine', icon: '💣',
+    desc: "Each player secretly plants 2 mines in the opponent's half. Any enemy piece except the king that lands on one is blown up." },
+  { key: 'prophecy', name: 'Prophecy', icon: '🔮',
+    desc: "Once per game, after your move, secretly predict your opponent's reply. If they play exactly that, you get a double move." },
+  { key: 'shifter', name: 'Shapeshifter', icon: '🦎',
+    desc: 'Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look.' },
 ];
 const modeInfo = (k) => MODES.find((m) => m.key === k) || MODES[0];
 
@@ -49,7 +55,7 @@ function sound(kind) {
   if (!ui.sound) return;
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]], check: [[660, 660, 0], [880, 880, 0.08]] }[kind];
+    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]], boom: [[160, 40, 0], [110, 30, 0.05], [70, 25, 0.1]], check: [[660, 660, 0], [880, 880, 0.08]] }[kind];
     for (const [f0, f1, delay] of tones) {
       const t = actx.currentTime + delay;
       const o = actx.createOscillator(), g = actx.createGain();
@@ -254,15 +260,18 @@ function checkReady() {
 }
 
 function applyRemote(a) {
+  if (ui.predict && a.kind !== 'drawOffer') { G = ui.predict.realG; ui.predict = null; ui.tool = null; } // drop an unfinished prophecy
   try {
     switch (a.kind) {
       case 'setHQ': E.setHiddenQueen(G, a.color, a.sq); break;
       case 'setTraitor': E.setTraitor(G, a.color, a.sq); break;
+      case 'setMines': E.setMines(G, a.color, a.squares); break;
+      case 'setShifter': E.setShifter(G, a.color, a.sq); break;
       case 'ready': ui.ready[a.color] = true; return checkReady();
       case 'move': {
         const before = capturesNow();
         E.makeMove(G, a.move);
-        sound(G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
+        sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
         ui.fresh = a.move.to;
         return afterAction();
       }
@@ -295,6 +304,7 @@ function pieceHTML(p, extra = '') {
   for (const c of omni ? [W, B] : [ui.viewer]) {
     const tr = G.traitor[c];
     if (tr && tr.id === p.id && !tr.used) badges += `<span class="badge dagger" title="${COLOR[c]}'s traitor">🗡</span>`;
+    if (G.shifter && G.shifter[c] === p.id) badges += `<span class="badge lizard" title="${COLOR[c]}'s shapeshifter">🦎</span>`;
   }
   return `<div class="pc ${p.owner} ${extra}">${t ? pieceSVG(t, p.owner) : tokenSVG(p.owner)}${badges}</div>`;
 }
@@ -311,6 +321,15 @@ function pickSets() {
   } else if (step === 'traitor') {
     each((p, i) => { if (p.owner !== c && p.type !== 'K') pickable.add(i); });
     const f = G.traitor[c] && E.findById(G, G.traitor[c].id); if (f) picked.add(f.sq);
+  } else if (step === 'mines') {
+    for (let i = 0; i < 64; i++) if (c === W ? E.rankOf(i) >= 4 : E.rankOf(i) <= 3) pickable.add(i);
+    G.mines[c].forEach((i) => picked.add(i));
+  } else if (step === 'shifter') {
+    each((p, i) => { if (p.owner === c && p.type !== 'K') pickable.add(i); });
+    const f = E.findById(G, G.shifter[c]); if (f) picked.add(f.sq);
+  } else if (ui.predict) {
+    const g = ui.predict.guess;
+    if (g) { picked.add(g.from); picked.add(g.to); }
   } else if (ui.tool === 'swap') {
     each((p, i) => { if (p.owner === c && p.type !== 'K') pickable.add(i); });
     if (ui.swapFirst != null) picked.add(ui.swapFirst);
@@ -341,6 +360,8 @@ function renderBoard() {
       if (p) inner += pieceHTML(p, ui.fresh === i ? 'fresh' : '');
       const m = targets.get(i);
       if (m) inner += p || m.ep ? '<span class="ring"></span>' : '<span class="dot"></span>';
+      if (ui.phase !== 'menu' && (isOmni() ? [W, B] : [ui.viewer]).some((c) => G.mines[c].includes(i))) inner += '<span class="mine" title="Mine">💣</span>';
+      if (ui.phase !== 'menu' && G.lastExplosion === i) inner += '<span class="boom">💥</span>';
       html += `<div class="${cls.join(' ')}" data-sq="${i}">${inner}</div>`;
     }
   }
@@ -366,6 +387,15 @@ function publicChips(c) {
   }
   if (t.swap) return `<span class="chip ${G.swapUsed[c] ? 'spent' : ''}" title="Secret swap">⇄ swap</span>`;
   if (t.objective) return '<span class="chip" title="Secret objective">🎯 objective</span>';
+  if (t.mines) return `<span class="chip ${G.mines[c].length ? '' : 'spent'}" title="Hidden mines left">💣 ×${G.mines[c].length}</span>`;
+  if (t.prophecy) {
+    const pr = G.prophecy[c];
+    return `<span class="chip ${pr && pr.state !== 'active' ? 'spent' : ''}" title="Prophecy">🔮 prophecy</span>`;
+  }
+  if (t.shifter) {
+    const id = G.shifter[c];
+    return `<span class="chip ${id != null && !E.findById(G, id) ? 'spent' : ''}" title="Shapeshifter">🦎 shapeshifter</span>`;
+  }
   return '';
 }
 
@@ -449,6 +479,21 @@ function secretItems(c) {
   if (t.hiddenQueen) items.push(`<li><span class="ic">♛</span><div>Secret queen: <b>${queenDesc(c)}</b></div></li>`);
   if (t.traitor) items.push(`<li><span class="ic">🗡</span><div>Traitor: <b>${traitorDesc(c)}</b></div></li>`);
   if (t.swap) items.push(`<li><span class="ic">⇄</span><div>Secret swap: <b>${G.swapUsed[c] ? 'used' : 'ready'}</b></div></li>`);
+  if (t.mines) {
+    const left = G.mines[c].map(E.sqName);
+    items.push(`<li><span class="ic">💣</span><div>Your mines: <b>${left.length ? left.join(', ') : ui.phase === 'secret' ? 'none yet' : 'all used up'}</b></div></li>`);
+  }
+  if (t.prophecy) {
+    const pr = G.prophecy[c];
+    const txt = !pr ? 'ready: use it on your turn' : pr.state === 'active' ? `waiting: you predicted ${E.sqName(pr.from)} → ${E.sqName(pr.to)}` : pr.state === 'hit' ? 'came true!' : 'missed';
+    items.push(`<li><span class="ic">🔮</span><div>Prophecy: <b>${txt}</b></div></li>`);
+  }
+  if (t.shifter) {
+    const id = G.shifter[c], f = E.findById(G, id);
+    const txt = id == null ? 'not chosen yet' : !f ? 'captured'
+      : `${PIECE_NAME[f.piece.type]} on ${E.sqName(f.sq)}${f.piece.shown !== f.piece.type ? `, disguised as a ${PIECE_NAME[f.piece.shown]}` : ''}`;
+    items.push(`<li><span class="ic">🦎</span><div>Shapeshifter: <b>${txt}</b></div></li>`);
+  }
   return items.join('');
 }
 
@@ -469,6 +514,17 @@ function setupCard() {
       <p>Click one enemy piece (not the king). Once per game, on your turn, you can move it as if it were yours.</p>
       <button class="btn primary big" data-act="confirm" ${G.traitor[c] == null ? 'disabled' : ''}>Confirm</button></div>`;
   }
+  if (step === 'mines') {
+    const n = G.mines[c].length;
+    return `<div class="card alert">${head}<h3>💣 Plant your mines</h3>
+      <p>Click ${E.MINES} squares in your opponent's half of the board (click again to move one). Any enemy piece except the king that lands on a mine is blown up. Your opponent can't see them.</p>
+      <button class="btn primary big" data-act="confirm" ${n === E.MINES ? '' : 'disabled'}>${n === E.MINES ? 'Confirm' : `Pick ${E.MINES - n} more`}</button></div>`;
+  }
+  if (step === 'shifter') {
+    return `<div class="card alert">${head}<h3>🦎 Choose your shapeshifter</h3>
+      <p>Click one of your pieces (not the king). Each time it captures, it secretly becomes the piece it captured, while keeping its current look.</p>
+      <button class="btn primary big" data-act="confirm" ${G.shifter[c] == null ? 'disabled' : ''}>Confirm</button></div>`;
+  }
   if (step === 'objective') {
     const o = E.objectiveById(G.objectives[c]);
     return `<div class="card alert">${head}<h3>🎯 Your secret objective</h3>
@@ -485,7 +541,17 @@ function drawOfferCard() {
     <div class="btn-row"><button class="btn primary" data-act="draw-accept">Accept</button><button class="btn" data-act="draw-decline">Decline</button></div></div>`;
 }
 
+function predictCard() {
+  const g = ui.predict.guess;
+  return `<div class="card alert"><h3>🔮 Predict their reply</h3>
+    <p>Your move is shown on the board. Click one of your opponent's pieces, then the square you think it will move to. If they play exactly that, you get a double move on your next turn.</p>
+    ${g ? `<p>Your prophecy: <b>${E.sqName(g.from)} → ${E.sqName(g.to)}</b></p>` : ''}
+    <div class="btn-row"><button class="btn primary" data-act="predict-ok" ${g ? '' : 'disabled'}>Lock in prophecy</button>
+    <button class="btn" data-act="predict-cancel">Cancel</button></div></div>`;
+}
+
 function playCard() {
+  if (ui.predict) return predictCard();
   const c = G.turn;
   if (G.turn !== ui.viewer) {
     const msg = ui.online ? `Waiting for ${nm(c)} to move…` : `Pass the device to ${nm(c)}.`;
@@ -493,8 +559,13 @@ function playCard() {
       ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
   }
   let hint = G.check === c ? '<b class="check-txt">Check!</b> You must get your king out of check.' : 'Click or drag a piece to move. Checkmate the king to win.';
+  if (G.bonusNow === c) hint = '🔮 <b>Bonus move!</b> Your prophecy came true. Make your second move.';
+  else if (G.bonusPending === c) hint = `🔮 <b>Your prophecy came true!</b> You get two moves this turn, unless your first move gives check.${G.check === c ? ' <b class="check-txt">You are in check.</b>' : ''}`;
   let actions = '';
-  if (ui.tool === 'traitor') {
+  if (ui.tool === 'prophecy') {
+    hint = "🔮 Make your move as normal. Then you'll predict your opponent's reply.";
+    actions = '<button class="btn" data-act="cancel">Cancel</button>';
+  } else if (ui.tool === 'traitor') {
     hint = 'Your traitor is the highlighted enemy piece. Make one move with it.';
     actions = '<button class="btn" data-act="cancel">Cancel</button>';
   } else if (ui.tool === 'swap') {
@@ -504,6 +575,7 @@ function playCard() {
     const btns = [];
     if (traitorReady(c)) btns.push('<button class="btn" data-act="traitor">🗡 Use Traitor</button>');
     if (E.canSwap(G, c)) btns.push('<button class="btn" data-act="swap">⇄ Secret Swap</button>');
+    if (G.twists.prophecy && !G.prophecy[c] && G.bonusPending !== c && G.bonusNow !== c) btns.push('<button class="btn" data-act="prophecy">🔮 Use Prophecy</button>');
     if (btns.length) actions = `<div class="btn-row">${btns.join('')}</div>`;
   }
   return `<div class="card"><h3><span class="dotlive"></span>${ui.online ? 'Your move' : `${nm(c)} to move`}</h3><p>${hint}</p>${actions}
@@ -543,8 +615,13 @@ function movesHTML() {
   const cell = (e, idx) => (e
     ? `<span class="m ${idx === h.length - 1 ? 'last' : ''} ${e.caught ? 'caught' : ''}"><span class="t">${moveText(e)}</span>${e.note ? `<span class="note">${e.note}</span>` : ''}</span>`
     : '<span></span>');
-  let rows = '';
-  for (let i = 0; i < h.length; i += 2) rows += `<div class="move-row"><span class="n">${i / 2 + 1}.</span>${cell(h[i], i)}${cell(h[i + 1], i + 1)}</div>`;
+  const pairs = [];
+  h.forEach((e, i) => {
+    let row = pairs[pairs.length - 1];
+    if (!row || e.color === W || row.b) { row = { w: null, b: null }; pairs.push(row); }
+    row[e.color] = i;
+  });
+  const rows = pairs.map((r, n) => `<div class="move-row"><span class="n">${n + 1}.</span>${r.w == null ? '<span class="m">…</span>' : cell(h[r.w], r.w)}${r.b == null ? '<span></span>' : cell(h[r.b], r.b)}</div>`).join('');
   return `<div class="moves"><div class="moves-title">Moves</div>${rows}</div>`;
 }
 
@@ -637,7 +714,7 @@ function traitorReady(c) {
   return G.twists.traitor && tr && !tr.used && !!E.findById(G, tr.id);
 }
 
-const setupSteps = () => ['hiddenQueen', 'traitor', 'objective'].filter((k) => G.twists[k]);
+const setupSteps = () => ['hiddenQueen', 'traitor', 'objective', 'mines', 'shifter'].filter((k) => G.twists[k]);
 
 function handoff(color, purpose = 'turn') {
   ui.selected = null; ui.moves = []; ui.tool = null; ui.swapFirst = null;
@@ -700,7 +777,7 @@ function rematch() {
 function afterAction() {
   ui.selected = null; ui.moves = []; ui.tool = null; ui.swapFirst = null;
   if (G.result) return gameOver();
-  if (ui.online) { startClock(G.turn); return render(); }
+  if (ui.online || G.turn === ui.viewer) { startClock(G.turn); return render(); } // online, or a bonus move
   stopClock();
   render();
   setTimeout(() => handoff(G.turn), ui.privacy ? 650 : 250);
@@ -722,12 +799,24 @@ function capturesNow() { return G.captured.w.length + G.captured.b.length; }
 function doMove(m) {
   if (m.promo === true) { ui.promo = m; return render(); } // ask which piece first
   ui.promo = null;
+  if (ui.tool === 'prophecy' && !m.prophecy) {
+    // Show the board after this move and let the player predict the reply before anything is sent.
+    const preview = structuredClone(G);
+    try { E.makeMove(preview, m); } catch (e) { ui.flash = e.message; return render(); }
+    if (!preview.result && preview.turn !== G.turn) {
+      ui.predict = { realG: G, move: m, guess: null };
+      G = preview;
+      ui.selected = null; ui.moves = []; ui.fresh = m.to;
+      return render();
+    }
+    ui.tool = null;
+  }
   const before = capturesNow();
   const revealedBefore = G.board.filter((p) => p && p.shown === p.type).length;
   try { E.makeMove(G, m); } catch (e) { ui.flash = e.message; return render(); }
-  sendAct({ kind: 'move', move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined } });
+  sendAct({ kind: 'move', move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined, prophecy: m.prophecy || undefined } });
   const revealed = G.board.filter((p) => p && p.shown === p.type).length > revealedBefore;
-  sound(G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
+  sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
   ui.fresh = m.to;
   ui.flash = '';
   afterAction();
@@ -769,10 +858,19 @@ boardEl.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   const i = +el.dataset.sq;
   if (ui.promo) { ui.promo = null; return render(); }
+  if (ui.predict) {
+    const t = ui.moves.find((x) => x.to === i);
+    if (t) { ui.predict.guess = { from: t.from, to: t.to }; ui.selected = null; ui.moves = []; return render(); }
+    const p = G.board[i];
+    if (p && p.owner === G.turn) { ui.selected = i; ui.moves = E.legalMoves(G, i); } else { ui.selected = null; ui.moves = []; }
+    return render();
+  }
   if (ui.phase === 'secret') {
     const step = currentStep();
     if (step === 'hiddenQueen') E.setHiddenQueen(G, ui.viewer, i);
     if (step === 'traitor') E.setTraitor(G, ui.viewer, i);
+    if (step === 'mines') E.toggleMine(G, ui.viewer, i);
+    if (step === 'shifter') E.setShifter(G, ui.viewer, i);
     return render();
   }
   if (!canAct()) return;
@@ -838,6 +936,8 @@ panel.addEventListener('click', (e) => {
       const step = currentStep();
       if (step === 'hiddenQueen') sendAct({ kind: 'setHQ', color: c, sq: E.findById(G, G.hiddenQueen[c]).sq });
       if (step === 'traitor') sendAct({ kind: 'setTraitor', color: c, sq: E.findById(G, G.traitor[c].id).sq });
+      if (step === 'mines') sendAct({ kind: 'setMines', color: c, squares: [...G.mines[c]] });
+      if (step === 'shifter') sendAct({ kind: 'setShifter', color: c, sq: E.findById(G, G.shifter[c]).sq });
       ui.setupQueue[0].steps.shift();
       if (ui.online) {
         if (!ui.setupQueue[0].steps.length) return markReady();
@@ -846,6 +946,15 @@ panel.addEventListener('click', (e) => {
       return runSetup();
     }
     case 'cancel': ui.tool = null; ui.swapFirst = null; ui.selected = null; ui.moves = []; return render();
+    case 'prophecy': ui.tool = 'prophecy'; ui.selected = null; ui.moves = []; return render();
+    case 'predict-ok': {
+      const { realG, move, guess } = ui.predict;
+      G = realG; ui.predict = null; ui.tool = null;
+      return doMove({ ...move, prophecy: guess });
+    }
+    case 'predict-cancel':
+      G = ui.predict.realG; ui.predict = null; ui.tool = null; ui.fresh = null; ui.selected = null; ui.moves = [];
+      return render();
     case 'swap': ui.tool = 'swap'; ui.selected = null; ui.moves = []; return render();
     case 'traitor': {
       const f = E.findById(G, G.traitor[c].id);
@@ -1036,6 +1145,9 @@ function openRules() {
       <ul>
         <li><b>Secret Queen:</b> a disguised queen can make pawn moves (including the two-square first move) without being revealed. If it reaches the last rank it's revealed.</li>
         <li><b>Traitor:</b> using it takes your whole turn. The traitor can't capture a king, and the move can't leave your own king in check. If the traitor is captured first, the power is lost.</li>
+        <li><b>Landmine:</b> mines can go on any square in the opponent's half. A mine is used up when it goes off. If blowing up a piece would leave its own king in check, the mine fizzles instead and the piece survives.</li>
+        <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check.</li>
+        <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Pass &amp; play:</b> a privacy screen hides the board between turns so the next player can take the device.</li>
         <li><b>Online:</b> create a game and send the invite link (or 5-letter code), or press <b>Find Opponent</b> to be matched with a random player in the same mode.</li>

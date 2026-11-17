@@ -47,13 +47,15 @@ const objectiveById = (id) => OBJECTIVES.find((o) => o.id === id);
 // ---------------------------------------------------------------- setup
 
 function newGame(twists = {}, rng = Math.random) {
-  const t = { hiddenQueen: false, traitor: false, objective: false, swap: false, ...twists };
+  const t = { hiddenQueen: false, traitor: false, objective: false, swap: false, mines: false, prophecy: false, shifter: false, ...twists };
   const s = {
     board: Array(64).fill(null), turn: W, twists: t, ep: null, nextId: 1,
     captured: { w: [], b: [] }, stats: { w: { promotions: 0 }, b: { promotions: 0 } },
     history: [], traitor: { w: null, b: null }, swapUsed: { w: false, b: false },
     objectives: { w: null, b: null }, hiddenQueen: { w: null, b: null },
     result: null, lastMove: null, ply: 0, halfmove: 0, positions: {}, check: null,
+    mines: { w: [], b: [] }, lastExplosion: null, shifter: { w: null, b: null },
+    prophecy: { w: null, b: null }, bonusPending: null, bonusNow: null,
   };
   const back = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
   for (const c of [W, B]) {
@@ -99,6 +101,50 @@ function setTraitor(s, c, i) {
   if (!s.twists.traitor || !p || p.owner === c || p.type === 'K') return false;
   s.traitor[c] = { id: p.id, used: false };
   return true;
+}
+
+// Landmine: each player plants MINES squares in the opponent's half. Mines placed by `c` hit pieces of other(c).
+const MINES = 2;
+const inEnemyHalf = (c, i) => (c === W ? rankOf(i) >= 4 : rankOf(i) <= 3);
+function toggleMine(s, c, i) {
+  if (!s.twists.mines || !inEnemyHalf(c, i)) return false;
+  const list = s.mines[c];
+  const k = list.indexOf(i);
+  if (k >= 0) list.splice(k, 1);
+  else if (list.length < MINES) list.push(i);
+  else return false;
+  return true;
+}
+function setMines(s, c, list) {
+  if (!s.twists.mines || !Array.isArray(list)) return false;
+  const uniq = [...new Set(list)].filter((i) => Number.isInteger(i) && i >= 0 && i < 64 && inEnemyHalf(c, i));
+  if (uniq.length !== MINES) return false;
+  s.mines[c] = uniq;
+  return true;
+}
+
+/** Shapeshifter: the chosen piece turns into whatever it captures, keeping its current look. */
+function setShifter(s, c, i) {
+  const p = s.board[i];
+  if (!s.twists.shifter || !p || p.owner !== c || p.type === 'K') return false;
+  s.shifter[c] = p.id;
+  return true;
+}
+
+/** A piece landed on `at`: set off an enemy mine there (kings are immune). */
+function tripMine(s, at, piece) {
+  const owner = other(piece.owner);
+  const list = s.mines[owner];
+  const k = list.indexOf(at);
+  if (k < 0 || piece.type === 'K') return '';
+  list.splice(k, 1);
+  s.lastExplosion = at;
+  const after = s.board.slice();
+  after[at] = null;
+  if (inCheck(after, piece.owner)) return 'fizzled'; // blowing it up would expose its own king: the mine is a dud
+  s.board[at] = null;
+  s.captured[owner].push({ type: piece.type, by: 'mine', owner: piece.owner });
+  return 'exploded';
 }
 
 function findById(s, id) {
@@ -295,7 +341,7 @@ function positionKey(s) {
   const pcs = s.board.map((p) => (p ? p.owner + p.type + (p.shown || '?') : '.')).join('');
   let ep = '-';
   if (s.ep != null && s.board.some((p, i) => p && p.owner === s.turn && legalMoves(s, i).some((m) => m.ep))) ep = s.ep;
-  return `${pcs}|${s.turn}|${castlingRights(s)}|${ep}`;
+  return `${pcs}|${s.turn}|${castlingRights(s)}|${ep}|${s.mines.w}/${s.mines.b}|${s.bonusPending || ''}${s.bonusNow || ''}`;
 }
 
 function insufficientMaterial(board) {
@@ -349,6 +395,16 @@ function applyMove(s, m, ctrl, promo) {
     if (p.type === 'P') { p.type = PROMOTIONS.includes(promo) ? promo : 'Q'; promoted = true; s.stats[p.owner].promotions++; }
     if (p.shown === 'P') { if (!promoted) revealed = true; p.shown = p.type; }
   }
+  if (victim && s.shifter[p.owner] === p.id && victim.type !== 'K') {
+    p.type = victim.type; // shapeshift: becomes what it captured, look unchanged
+    if (p.type === 'P' && rankOf(m.to) === lastRank(p.owner)) p.type = 'Q';
+  }
+  s.lastExplosion = null;
+  let boom = '';
+  const landings = [[m.to, p]];
+  if (m.castle) { const rs = sq(m.castle === 'K' ? 5 : 3, rankOf(m.from)); landings.push([rs, b[rs]]); }
+  for (const [at, piece] of landings) { const r = tripMine(s, at, piece); if (r) boom = r; }
+  if (boom === 'exploded') s.halfmove = 0;
   // Short algebraic-style notation based on what the opponent can see.
   let text;
   const seen = revealed ? p.type : shownBefore;
@@ -357,9 +413,11 @@ function applyMove(s, m, ctrl, promo) {
   else text = `${seen}${victim ? 'x' : ''}${sqName(m.to)}`;
   if (promoted && p.shown === p.type) text += '=' + p.type;
   if (revealed) text += ' (revealed)';
+  if (boom === 'exploded') text += ' 💥';
+  if (boom === 'fizzled') text += ' (mine fizzled)';
   if (m.traitor) text = '🗡 ' + text;
   s.lastMove = { from: m.from, to: m.to };
-  return { text };
+  return { text, boom };
 }
 
 function end(s, winner, reason) {
@@ -367,8 +425,11 @@ function end(s, winner, reason) {
 }
 
 /** After a move or swap: reveal disguised checkers, then look for every way the game can end. */
-function afterTurn(s, mover, entry) {
+const addNote = (entry, text) => { if (entry) entry.note = entry.note ? `${entry.note} · ${text}` : text; };
+
+function afterTurn(s, entry) {
   const opp = s.turn;
+  const mover = other(opp);
   const k = kingSq(s.board, opp);
   const checkers = k >= 0 ? attackers(s.board, k, mover) : [];
   let revealedByCheck = false;
@@ -395,7 +456,7 @@ function afterTurn(s, mover, entry) {
   if (!s.result && s.halfmove >= 100) end(s, null, 'the 50-move rule');
 
   if (entry) {
-    if (revealedByCheck) entry.note = 'disguised piece revealed by giving check';
+    if (revealedByCheck) addNote(entry, 'disguised piece revealed by giving check');
     if (s.result && s.result.reason === 'won by checkmate') entry.text += '#';
     else if (s.check) entry.text += '+';
   }
@@ -406,17 +467,47 @@ function recordStart(s) {
 }
 
 function makeMove(s, move) {
-  const me = s.turn;
+  const me = s.turn, foe = other(me);
   const legal = legalMoves(s, move.from, { traitor: !!move.traitor }).find((m) => m.to === move.to);
   if (!legal) throw new Error('Illegal move');
   recordStart(s);
+  const takeBonus = s.bonusPending === me; // first half of a prophecy double move
+  const isBonus = s.bonusNow === me; // second half
+  s.bonusPending = null;
+  s.bonusNow = null;
+
+  // Resolve the opponent's prophecy about this very move.
+  const pr = s.prophecy[foe];
+  let prophecyNote = '';
+  if (pr && pr.state === 'active') {
+    const hit = pr.from === legal.from && pr.to === legal.to;
+    pr.state = hit ? 'hit' : 'miss';
+    if (hit) s.bonusPending = foe;
+    prophecyNote = hit ? `🔮 ${foe === W ? 'White' : 'Black'} predicted this move: bonus move next turn` : '🔮 a prophecy missed';
+  }
+
   const { text } = applyMove(s, legal, me, move.promo);
   if (legal.traitor) s.traitor[me].used = true;
   const entry = { color: me, text };
+  if (isBonus) addNote(entry, '🔮 bonus move');
+  if (prophecyNote) addNote(entry, prophecyNote);
   s.history.push(entry);
-  s.turn = other(me);
+
+  // Keep the turn for the bonus move, unless this move gave check (or there's nothing left to play).
+  let keep = takeBonus && !inCheck(s.board, foe);
+  if (keep && !hasAnyMove(s, me)) keep = false;
+  if (takeBonus && !keep) addNote(entry, '🔮 bonus move forfeited');
+  s.turn = keep ? me : foe;
+  if (keep) s.bonusNow = me;
   s.ply++;
-  afterTurn(s, me, entry);
+  afterTurn(s, entry);
+
+  // Make a prophecy about the opponent's reply (once per game).
+  const guess = move.prophecy;
+  if (guess && s.twists.prophecy && !s.prophecy[me] && !s.result && s.turn === foe
+      && legalMoves(s, guess.from).some((m) => m.to === guess.to)) {
+    s.prophecy[me] = { from: guess.from, to: guess.to, state: 'active' };
+  }
 }
 
 /** Secret Swap: exchange the true identities of two of your pieces. Their looks stay the same. */
@@ -439,7 +530,7 @@ function doSwap(s, a, b) {
   s.history.push(entry);
   s.turn = other(me);
   s.ply++;
-  afterTurn(s, me, entry);
+  afterTurn(s, entry);
 }
 
 function resign(s, c) { end(s, other(c), 'won by resignation'); }
@@ -447,7 +538,7 @@ function agreeDraw(s) { end(s, null, 'agreement'); }
 
 globalThis.TGEngine = {
   W, B, other, FILES, sq, fileOf, rankOf, sqName, PIECE_NAME, PIECE_VALUE, PROMOTIONS, OBJECTIVES, objectiveById,
-  newGame, setHiddenQueen, setTraitor, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
+  newGame, setHiddenQueen, setTraitor, toggleMine, setMines, setShifter, MINES, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
   resign, agreeDraw, positionKey, insufficientMaterial,
 };
 })();

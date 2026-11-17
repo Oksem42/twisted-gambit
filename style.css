@@ -356,3 +356,9 @@ a { color: inherit; }
   .side-nav a.side-item { display: none; } /* Source link lives in the README */
   .si-ic { width: 24px; height: 24px; }
 }
+
+/* landmine, shapeshifter, prophecy */
+.badge.lizard { background: #2f9e5b; left: 2%; right: auto; bottom: 2%; top: auto; font-size: calc(var(--board) / 8 * .2); }
+.mine { position: absolute; left: 4%; bottom: 3%; font-size: calc(var(--board) / 8 * .26); line-height: 1; z-index: 3; pointer-events: none; filter: drop-shadow(0 1px 1px #0008); }
+.boom { position: absolute; inset: 0; display: grid; place-items: center; font-size: calc(var(--board) / 8 * .8); z-index: 4; pointer-events: none; animation: boom .9s ease-out forwards; }
+@keyframes boom { 0% { transform: scale(.3); opacity: 1; } 60% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1); opacity: .35; } }

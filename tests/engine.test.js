@@ -233,6 +233,98 @@ test('swap is not allowed while in check', () => {
   ok(!E.canSwap(s, 'w'));
 });
 
+// ------------------------------------------------ landmine
+test('mines must go in the enemy half, exactly 2', () => {
+  const s = E.newGame({ mines: true });
+  ok(!E.setMines(s, 'w', [S('c3'), S('h5')]), 'c3 is in your own half');
+  ok(!E.setMines(s, 'w', [S('c6')]), 'need two');
+  ok(E.setMines(s, 'w', [S('c6'), S('h5')]));
+  ok(E.toggleMine(s, 'b', S('d4')) && E.toggleMine(s, 'b', S('e3')) && !E.toggleMine(s, 'b', S('f3')), 'third mine refused');
+});
+
+test('a mine destroys an enemy piece that lands on it', () => {
+  const s = position({ e1: 'wK', e8: 'bK', b8: 'bN' }, 'b', { mines: true });
+  E.setMines(s, 'w', [S('c6'), S('h5')]);
+  mv(s, 'b8', 'c6');
+  eq(s.board[S('c6')], null);
+  eq(s.history[0].text, 'Nc6 💥');
+  eq(s.captured.w[0].by, 'mine');
+  eq(s.mines.w.join(), String(S('h5')), 'used mine is gone');
+});
+
+test('kings are immune to mines', () => {
+  const s = position({ e1: 'wK', e8: 'bK' }, 'b', { mines: true });
+  E.setMines(s, 'w', [S('e7'), S('a5')]);
+  mv(s, 'e8', 'e7');
+  eq(s.board[S('e7')].type, 'K');
+  ok(s.mines.w.includes(S('e7')), 'mine stays hidden');
+});
+
+test('a mine fizzles if the blast would expose the king', () => {
+  const s = position({ a1: 'wK', e1: 'wR', e8: 'bK', c6: 'bN' }, 'b', { mines: true });
+  E.setMines(s, 'w', [S('e5'), S('h5')]);
+  mv(s, 'c6', 'e5'); // knight blocks the check by landing on the mine
+  eq(s.board[S('e5')].type, 'N', 'knight survives');
+  ok(s.history[0].text.includes('mine fizzled'));
+  ok(!s.mines.w.includes(S('e5')), 'the dud is used up');
+});
+
+// ------------------------------------------------ prophecy
+test('a correct prophecy grants a double move', () => {
+  const s = E.newGame({ prophecy: true });
+  mv(s, 'e2', 'e4', { prophecy: { from: S('e7'), to: S('e5') } });
+  eq(s.prophecy.w.state, 'active');
+  mv(s, 'e7', 'e5');
+  eq(s.prophecy.w.state, 'hit');
+  ok(s.history[1].note.includes('predicted'));
+  mv(s, 'g1', 'f3');
+  eq(s.turn, 'w', 'still white: bonus move');
+  mv(s, 'b1', 'c3');
+  eq(s.turn, 'b');
+  ok(s.history[3].note.includes('bonus move'));
+});
+
+test('a wrong prophecy gives nothing and is used up', () => {
+  const s = E.newGame({ prophecy: true });
+  mv(s, 'e2', 'e4', { prophecy: { from: S('e7'), to: S('e5') } });
+  mv(s, 'd7', 'd5');
+  eq(s.prophecy.w.state, 'miss');
+  mv(s, 'g1', 'f3', { prophecy: { from: S('a7'), to: S('a6') } });
+  eq(s.turn, 'b');
+  eq(s.prophecy.w.state, 'miss', 'only one prophecy per game');
+});
+
+test('the bonus move is lost if the first move gives check', () => {
+  const s = E.newGame({ prophecy: true });
+  mv(s, 'e2', 'e4', { prophecy: { from: S('f7'), to: S('f6') } });
+  mv(s, 'f7', 'f6');
+  mv(s, 'd1', 'h5'); // check
+  eq(s.turn, 'b');
+  ok(s.history[2].note.includes('forfeited'));
+});
+
+// ------------------------------------------------ shapeshifter
+test('shapeshifter becomes what it captures but keeps its look', () => {
+  const s = E.newGame({ shifter: true });
+  ok(!E.setShifter(s, 'w', S('e1')), 'not the king');
+  ok(E.setShifter(s, 'w', S('b1')));
+  mv(s, 'b1', 'c3'); mv(s, 'd7', 'd5');
+  mv(s, 'c3', 'd5');
+  const p = s.board[S('d5')];
+  eq(p.type, 'P'); eq(p.shown, 'N');
+  mv(s, 'a7', 'a6');
+  eq(targets(s, 'd5'), 'd6', 'it now moves like a pawn');
+  mv(s, 'd5', 'd6');
+  eq(p.shown, 'P', 'revealed: a knight could not do that');
+});
+
+test('shapeshifter that captures a queen becomes a queen', () => {
+  const s = position({ e1: 'wK', e8: 'bK', c3: 'wN', d5: 'bQ' }, 'w', { shifter: true });
+  E.setShifter(s, 'w', S('c3'));
+  mv(s, 'c3', 'd5');
+  eq(s.board[S('d5')].type, 'Q'); eq(s.board[S('d5')].shown, 'N');
+});
+
 globalThis.TGTestResults = results;
 
 // Node runner
