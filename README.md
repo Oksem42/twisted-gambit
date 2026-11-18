@@ -24,6 +24,8 @@ Full standard chess, matching the official FIDE rules and chess.com's automatic 
 - **Promotion** to queen, rook, bishop or knight.
 - **Draws:** stalemate, threefold repetition, the 50-move rule, insufficient material, or agreement (all declared automatically).
 
+Each player has **10 minutes** on a countdown clock. Running out of time loses, unless the opponent can't possibly checkmate (bare king, or king and one bishop or knight), which is a draw.
+
 With hidden pieces, the game judges everything using each piece's true identity, like an arbiter who can see the whole board. A disguised piece that gives check is revealed immediately.
 
 ## Play

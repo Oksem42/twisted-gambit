@@ -338,6 +338,18 @@ test('shapeshifter that captures a queen becomes a queen', () => {
   eq(s.board[S('d5')].type, 'Q'); eq(s.board[S('d5')].shown, 'N');
 });
 
+test('running out of time loses', () => {
+  const s = position({ e1: 'wK', e8: 'bK', a1: 'wR', h8: 'bR' }, 'w');
+  E.timeout(s, 'w');
+  eq(s.result.winner, 'b'); eq(s.result.reason, 'won on time');
+});
+
+test('timeout is a draw if the opponent cannot checkmate', () => {
+  const s = position({ e1: 'wK', e8: 'bK', a1: 'wR', c8: 'bB' }, 'w');
+  E.timeout(s, 'w');
+  eq(s.result.winner, null); eq(s.result.reason, 'timeout vs insufficient material');
+});
+
 globalThis.TGTestResults = results;
 
 // Node runner

@@ -552,11 +552,24 @@ function doSwap(s, a, b) {
 }
 
 function resign(s, c) { end(s, other(c), 'won by resignation'); }
+
+/** Whether `c` still has enough material to ever checkmate (bare king, or king + one minor piece, can't). */
+function canCheckmate(board, c) {
+  const rest = board.filter((p) => p && p.owner === c && p.type !== 'K');
+  if (rest.length === 0) return false;
+  if (rest.length === 1 && (rest[0].type === 'B' || rest[0].type === 'N')) return false;
+  return true;
+}
+/** `c` ran out of time: they lose, unless the opponent couldn't checkmate anyway (then it's a draw). */
+function timeout(s, c) {
+  if (canCheckmate(s.board, other(c))) end(s, other(c), 'won on time');
+  else end(s, null, 'timeout vs insufficient material');
+}
 function agreeDraw(s) { end(s, null, 'agreement'); }
 
 globalThis.TGEngine = {
   W, B, other, FILES, sq, fileOf, rankOf, sqName, PIECE_NAME, PIECE_VALUE, PROMOTIONS, OBJECTIVES, objectiveById,
   newGame, prophecyReady, prophecyWait, PROPHECY_RECHARGE, setHiddenQueen, setTraitor, toggleMine, setMines, setShifter, MINES, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
-  resign, agreeDraw, positionKey, insufficientMaterial,
+  resign, agreeDraw, timeout, canCheckmate, positionKey, insufficientMaterial,
 };
 })();

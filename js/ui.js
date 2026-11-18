@@ -71,24 +71,44 @@ function sound(kind) {
   } catch { /* audio unavailable */ }
 }
 
-// ---------------------------------------------------------------- clocks (time used per player)
+// ---------------------------------------------------------------- clocks: 10 minutes each, counting down
+// ui.clock[c] holds the time each player has USED; the display shows what's left.
+const TIME_CONTROL = 10 * 60 * 1000;
+const LOW_TIME = 20 * 1000;
 function tick() {
   const c = ui.clock;
   if (!c.running) return;
   const now = performance.now();
-  c[c.running] += now - c.since;
+  c[c.running] = Math.min(TIME_CONTROL, c[c.running] + (now - c.since));
   c.since = now;
 }
 function startClock(color) { tick(); ui.clock.running = color; ui.clock.since = performance.now(); }
 function stopClock() { tick(); ui.clock.running = null; }
-const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const timeLeft = (c) => Math.max(0, TIME_CONTROL - ui.clock[c]);
+function fmtLeft(c) {
+  const ms = timeLeft(c);
+  if (ms < LOW_TIME) return `0:${String(Math.floor(ms / 1000)).padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`; // tenths, like chess.com
+  const sec = Math.ceil(ms / 1000);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
 function updateClocks() {
   document.querySelectorAll('.clock[data-c]').forEach((el) => {
-    el.querySelector('.ct').textContent = fmt(ui.clock[el.dataset.c]);
-    el.classList.toggle('active', ui.clock.running === el.dataset.c);
+    const c = el.dataset.c;
+    el.querySelector('.ct').textContent = fmtLeft(c);
+    el.classList.toggle('active', ui.clock.running === c);
+    el.classList.toggle('low', timeLeft(c) < LOW_TIME && ui.phase !== 'menu');
   });
 }
-setInterval(() => { tick(); updateClocks(); }, 250);
+function checkFlag() {
+  const c = ui.clock.running;
+  if (!c || ui.phase !== 'play' || G.result || timeLeft(c) > 0) return;
+  // Online, each browser only calls time on its own clock; the other side hears about it.
+  if (ui.online && c !== ui.viewer) return;
+  E.timeout(G, c);
+  sendAct({ kind: 'timeout', color: c });
+  gameOver();
+}
+setInterval(() => { tick(); updateClocks(); checkFlag(); }, 100);
 
 // ---------------------------------------------------------------- online (PeerJS: direct browser-to-browser)
 const NET_PREFIX = 'twisted-gambit-v1-';
@@ -272,14 +292,18 @@ function applyRemote(a) {
       case 'ready': ui.ready[a.color] = true; return checkReady();
       case 'move': {
         const before = capturesNow();
+        if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
         E.makeMove(G, a.move);
         sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
         ui.fresh = null;
         ui.anim = slidesFor(a.move);
         return afterAction();
       }
-      case 'swap': E.doSwap(G, a.a, a.b); sound('reveal'); return afterAction();
+      case 'swap':
+        if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
+        E.doSwap(G, a.a, a.b); sound('reveal'); return afterAction();
       case 'resign': E.resign(G, a.color); return gameOver();
+      case 'timeout': if (!G.result) { ui.clock[a.color] = TIME_CONTROL; E.timeout(G, a.color); } return gameOver();
       case 'drawOffer': ui.drawOffered = true; sound('reveal'); break;
       case 'drawReply':
         if (a.accept) { E.agreeDraw(G); return gameOver(); }
@@ -422,7 +446,7 @@ function renderBar(el, c) {
       <div class="name"><span class="nm">${nm(c)}</span><span class="tag">(${COLOR[c]}${you})</span><span class="chips">${publicChips(c)}</span></div>
       <div class="caps">${capturedHTML(c)}</div>
     </div>
-    <div class="clock" data-c="${c}"><span class="ci">⏱</span><span class="ct">${fmt(ui.clock[c])}</span></div>`;
+    <div class="clock" data-c="${c}"><span class="ci">⏱</span><span class="ct">${fmtLeft(c)}</span></div>`;
 }
 
 function renderPromo() {
@@ -905,7 +929,8 @@ function doMove(m, dropped = false) {
   const before = capturesNow();
   const revealedBefore = G.board.filter((p) => p && p.shown === p.type).length;
   try { E.makeMove(G, m); } catch (e) { ui.flash = e.message; return render(); }
-  sendAct({ kind: 'move', move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined, prophecy: m.prophecy || undefined } });
+  tick();
+  sendAct({ kind: 'move', t: Math.round(ui.clock[ui.viewer]), move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined, prophecy: m.prophecy || undefined } });
   const revealed = G.board.filter((p) => p && p.shown === p.type).length > revealedBefore;
   sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
   ui.fresh = dropped ? m.to : null;
@@ -927,7 +952,8 @@ function onSwapClick(i) {
   }
   const a = ui.swapFirst;
   E.doSwap(G, a, i);
-  sendAct({ kind: 'swap', a, b: i });
+  tick();
+  sendAct({ kind: 'swap', a, b: i, t: Math.round(ui.clock[ui.viewer]) });
   sound('reveal');
   ui.fresh = null;
   ui.flash = '';
@@ -1254,6 +1280,7 @@ function openRules() {
         <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check. After using it, it recharges for 5 of your turns.</li>
         <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
+        <li><b>Clock:</b> each player has 10 minutes for the whole game, counting down on their turn. Run out and you lose, unless your opponent only has a king (or a king and one bishop or knight), which is a draw.</li>
         <li><b>Pass &amp; play:</b> a privacy screen hides the board between turns so the next player can take the device.</li>
         <li><b>Online:</b> create a game and send the invite link (or 5-letter code), or press <b>Find Opponent</b> to be matched with a random player in the same mode.</li>
       </ul>
