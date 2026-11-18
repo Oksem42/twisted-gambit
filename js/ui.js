@@ -110,9 +110,13 @@ function checkFlag() {
 }
 setInterval(() => { tick(); updateClocks(); checkFlag(); }, 100);
 
-// ---------------------------------------------------------------- online (PeerJS: direct browser-to-browser)
+// ---------------------------------------------------------------- online
+// Games connect through Supabase Realtime (js/relay.js), like Charmed Hold'em, so they work on any network.
+// If Supabase can't be reached, they fall back to PeerJS, which connects the two browsers directly.
 const NET_PREFIX = 'twisted-gambit-v1-';
-const netAvailable = () => typeof window.Peer === 'function';
+const Relay = globalThis.TGRelay;
+const relayOn = () => !!(Relay && Relay.available());
+const netAvailable = () => relayOn() || typeof window.Peer === 'function';
 function makeCode() {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let s = '';
@@ -125,12 +129,30 @@ function netTeardown() {
   ui.online = false;
   if (!n) return;
   clearTimeout(n.timer);
+  if (n.mm) n.mm.cancel();
   try { if (n.conn) n.conn.close(); } catch { /* ignore */ }
   try { if (n.peer) n.peer.destroy(); } catch { /* ignore */ }
 }
-function netHost(mode) {
+function netHost(mode, code = makeCode()) {
+  if (!relayOn()) return peerHost(mode, code);
   netTeardown();
-  const n = ui.net = { role: 'host', code: makeCode(), myColor: W, status: 'connecting', mode, oppName: null, error: '' };
+  const n = ui.net = { role: 'host', code, myColor: W, status: 'connecting', mode, oppName: null, error: '', via: 'relay' };
+  Relay.host(code).then((h) => {
+    if (ui.net !== n) return h.destroy();
+    n.peer = h;
+    n.status = 'waiting';
+    h.on('connection', (conn) => acceptConn(n, conn));
+    refresh();
+  }).catch((e) => {
+    if (ui.net !== n) return;
+    if (e.message === 'taken') return netHost(mode); // code already in use: pick another
+    peerHost(mode, code);
+  });
+}
+function peerHost(mode, code = makeCode()) {
+  netTeardown();
+  const n = ui.net = { role: 'host', code, myColor: W, status: 'connecting', mode, oppName: null, error: '', via: 'peer' };
+  if (typeof window.Peer !== 'function') { n.status = 'error'; n.error = 'Could not reach the game server. Check your internet connection.'; return refresh(); }
   const peer = n.peer = new window.Peer(NET_PREFIX + n.code);
   peer.on('open', () => { if (ui.net === n) { n.status = 'waiting'; refresh(); } });
   peer.on('connection', (conn) => acceptConn(n, conn));
@@ -183,9 +205,60 @@ function quickJoin(mode, slot) {
     netError(n, err);
   });
 }
-function netJoin(code) {
+// ---- Random matchmaking through the relay: wait in the mode's lobby and pair with the next searcher.
+function quickSearch(mode) {
+  if (!relayOn()) return quickWait(mode);
   netTeardown();
-  const n = ui.net = { role: 'guest', code: code.trim().toUpperCase(), myColor: B, status: 'connecting', oppName: null, error: '' };
+  const n = ui.net = { role: 'guest', quick: true, code: '', myColor: B, status: 'searching', mode, oppName: null, error: '', via: 'relay' };
+  n.mm = Relay.matchmake(mode, ({ role, code }) => {
+    if (ui.net !== n) return;
+    n.mm = null;
+    if (role === 'host') quickRelayHost(mode, code); else quickRelayJoin(mode, code);
+  }, () => { if (ui.net === n) quickWait(mode); });
+}
+function quickRelayHost(mode, code) {
+  netTeardown();
+  const n = ui.net = { role: 'host', quick: true, code, myColor: W, status: 'searching', mode, oppName: null, error: '', via: 'relay' };
+  const retry = () => { if (ui.net === n && !ui.online) quickSearch(mode); };
+  n.timer = setTimeout(retry, 15000); // the partner never showed up: back to the lobby
+  n.onEarlyClose = retry;
+  Relay.host(code).then((h) => {
+    if (ui.net !== n) return h.destroy();
+    n.peer = h;
+    h.on('connection', (conn) => { clearTimeout(n.timer); acceptConn(n, conn); });
+  }).catch(retry);
+}
+function quickRelayJoin(mode, code) {
+  netTeardown();
+  const n = ui.net = { role: 'guest', quick: true, code, myColor: B, status: 'searching', mode, oppName: null, error: '', via: 'relay' };
+  const retry = () => { if (ui.net === n && !ui.online) quickSearch(mode); };
+  n.onEarlyClose = retry;
+  Relay.join(code).then((conn) => {
+    if (ui.net !== n) return conn.close();
+    n.peer = { destroy: () => conn.close() };
+    bindConn(n, conn);
+  }).catch(retry);
+}
+
+function netJoin(code) {
+  code = code.trim().toUpperCase();
+  if (!relayOn()) return peerJoin(code);
+  netTeardown();
+  const n = ui.net = { role: 'guest', code, myColor: B, status: 'connecting', oppName: null, error: '', via: 'relay' };
+  Relay.join(code).then((conn) => {
+    if (ui.net !== n) return conn.close();
+    n.peer = { destroy: () => conn.close() };
+    bindConn(n, conn);
+  }).catch((e) => {
+    if (ui.net !== n) return;
+    if (e.message === 'full') { n.status = 'error'; n.error = 'That game already has two players.'; return refresh(); }
+    peerJoin(code); // the host may be on a direct connection instead
+  });
+}
+function peerJoin(code) {
+  netTeardown();
+  const n = ui.net = { role: 'guest', code: code.trim().toUpperCase(), myColor: B, status: 'connecting', oppName: null, error: '', via: 'peer' };
+  if (typeof window.Peer !== 'function') { n.status = 'error'; n.error = 'Could not reach the game server. Check your internet connection.'; return refresh(); }
   const peer = n.peer = new window.Peer();
   peer.on('open', () => {
     if (ui.net !== n) return;
@@ -210,7 +283,7 @@ function bindConn(n, conn) {
 }
 function netError(n, err) {
   if (ui.net !== n) return;
-  if (err.type === 'unavailable-id' && n.role === 'host') return netHost(n.mode);
+  if (err.type === 'unavailable-id' && n.role === 'host') return peerHost(n.mode);
   n.status = 'error';
   n.error = {
     'peer-unavailable': 'No game found with that code. Check the code and make sure your friend is still waiting.',
@@ -696,7 +769,7 @@ function renderPanel() {
   let chips = `<span class="chip">${mode.icon} ${mode.name}</span>`;
   if (ui.online && ui.net) {
     const ok = ui.net.status === 'connected';
-    chips += `<span class="chip ${ok ? 'live' : 'down'}">${ok ? '● Online' : '● Disconnected'} · code ${esc(ui.net.code)}</span>`;
+    chips += `<span class="chip ${ok ? 'live' : 'down'}">${ok ? '● Online' : '● Disconnected'} · ${ui.net.quick ? 'random opponent' : 'code ' + esc(ui.net.code)}</span>`;
   } else if (ui.bot && ui.phase !== 'menu') {
     chips += `<span class="chip">🤖 vs ${esc(Bot.NAME)}</span>`;
   } else if (ui.phase !== 'menu') {
@@ -1229,7 +1302,7 @@ function renderLobby() {
   modal.querySelectorAll('[data-lobby]').forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.lobby;
     if (a === 'create') { saveName(); netHost(ui.gameMode); renderLobby(); }
-    if (a === 'quick') { saveName(); quickWait(ui.gameMode); renderLobby(); }
+    if (a === 'quick') { saveName(); quickSearch(ui.gameMode); renderLobby(); }
     if (a === 'join') {
       saveName();
       const code = ($('join-code').value || '').trim().toUpperCase();
