@@ -2,6 +2,11 @@
 const E = globalThis.TGEngine;
 const { pieceSVG, tokenSVG } = globalThis.TGPieces;
 const Bot = globalThis.TGBot;
+const Jules = globalThis.TGJules;
+const BOTS = {
+  v1: { engine: Bot, name: Bot.NAME, tag: 'A friendly sparring partner', icon: '🤖' },
+  jules: { engine: Jules, name: Jules.NAME, tag: 'Best chess player of all time', icon: '👑' },
+};
 const { W, B, other, PIECE_NAME } = E;
 const COLOR = { w: 'White', b: 'Black' };
 
@@ -771,7 +776,7 @@ function renderPanel() {
     const ok = ui.net.status === 'connected';
     chips += `<span class="chip ${ok ? 'live' : 'down'}">${ok ? '● Online' : '● Disconnected'} · ${ui.net.quick ? 'random opponent' : 'code ' + esc(ui.net.code)}</span>`;
   } else if (ui.bot && ui.phase !== 'menu') {
-    chips += `<span class="chip">🤖 vs ${esc(Bot.NAME)}</span>`;
+    chips += `<span class="chip">${BOTS[ui.bot.id].icon} vs ${esc(ui.names[ui.bot.color])}</span>`;
   } else if (ui.phase !== 'menu') {
     chips += '<span class="chip">Pass &amp; play</span>';
   }
@@ -909,17 +914,18 @@ function startLocalGame(mode) {
 }
 
 // ---------------------------------------------------------------- bot games
-function startBotGame(mode) {
+function startBotGame(mode, id = 'v1') {
   netTeardown();
   ui.gameMode = mode;
   store.set('mode', mode);
   G = E.newGame({ [mode]: true });
-  ui.bot = { color: B };
+  if (!BOTS[id]) id = 'v1';
+  ui.bot = { color: B, id };
   ui.viewer = W;
-  ui.names = { w: ui.myName || ui.localNames.w || 'You', b: Bot.NAME };
+  ui.names = { w: ui.myName || ui.localNames.w || 'You', b: BOTS[id].name };
   ui.clock = { w: 0, b: 0, running: null, since: 0 };
   Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false });
-  Bot.setup(G, ui.bot.color);
+  BOTS[id].engine.setup(G, ui.bot.color);
   const steps = setupSteps();
   ui.setupQueue = steps.length ? [{ color: W, steps: [...steps], started: true }] : [];
   closeModal();
@@ -934,7 +940,8 @@ function botTurn() {
   const game = G;
   botTimer = setTimeout(() => {
     if (G !== game || !ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
-    const action = Bot.chooseAction(G);
+    const thinkMs = Math.max(300, Math.min(2500, timeLeft(ui.bot.color) / 25));
+    const action = (ui.bot.id === 'jules' && Jules.chooseAction(G, { ms: thinkMs })) || Bot.chooseAction(G);
     if (!action) return;
     const before = capturesNow();
     try {
@@ -947,11 +954,11 @@ function botTurn() {
     } catch { return; }
     ui.fresh = null;
     afterAction();
-  }, 450 + Math.random() * 800);
+  }, ui.bot.id === 'jules' ? 80 : 450 + Math.random() * 800); // Jules spends its time thinking instead
 }
 
 function rematch() {
-  if (ui.bot) return startBotGame(ui.gameMode);
+  if (ui.bot) return startBotGame(ui.gameMode, ui.bot.id);
   if (!ui.online) return startLocalGame(ui.gameMode);
   if (!ui.net || ui.net.status !== 'connected') { ui.flash = 'Your opponent is no longer connected.'; return render(); }
   if (ui.net.role === 'host') return startOnlineGame(ui.gameMode);
@@ -1164,7 +1171,7 @@ panel.addEventListener('click', (e) => {
         render();
         setTimeout(() => {
           if (!ui.bot || G.result) return;
-          if (Bot.acceptsDraw(G)) { E.agreeDraw(G); return gameOver(); }
+          if (BOTS[ui.bot.id].engine.acceptsDraw(G)) { E.agreeDraw(G); return gameOver(); }
           ui.flash = `${ui.names[ui.bot.color]} declined the draw.`;
           render();
         }, 700 + Math.random() * 600);
@@ -1206,6 +1213,15 @@ function openNewGame() {
           <button class="btn big secondary" id="play-bot">🤖 Play Bot</button>
           <button class="btn big secondary" id="play-local">👥 Pass &amp; Play</button>
         </div>
+        <div class="bot-pick hidden" id="bot-pick">
+          <div class="section-label">Choose your opponent</div>
+          ${Object.entries(BOTS).map(([id, b]) => `
+            <button class="bot-card" data-bot="${id}">
+              <span class="bot-av">${b.icon}</span>
+              <span><span class="bot-name">${esc(b.name)}</span><span class="bot-tag">${esc(b.tag)}</span></span>
+              <span class="bot-go">Play</span>
+            </button>`).join('')}
+        </div>
         <details class="local-opts">
           <summary>Pass &amp; play settings</summary>
           <div class="names">
@@ -1217,7 +1233,8 @@ function openNewGame() {
       </div></div>`;
     modal.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { saveForm(); mode = b.dataset.mode; draw(); }));
     $('play-local').addEventListener('click', () => { saveForm(); startLocalGame(mode); });
-    $('play-bot').addEventListener('click', () => { saveForm(); startBotGame(mode); });
+    $('play-bot').addEventListener('click', () => { $('bot-pick').classList.toggle('hidden'); $('bot-pick').scrollIntoView({ block: 'nearest' }); });
+    modal.querySelectorAll('[data-bot]').forEach((b) => b.addEventListener('click', () => { saveForm(); startBotGame(mode, b.dataset.bot); }));
     $('play-online').addEventListener('click', () => { saveForm(); ui.gameMode = mode; store.set('mode', mode); openLobby(); });
   };
   const saveForm = () => {

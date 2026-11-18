@@ -363,3 +363,15 @@ a { color: inherit; }
 .chip.spent-soft { opacity: .55; }
 .clock.low.active { background: #e02828; color: #fff; }
 .clock.low:not(.active) { color: #ff8a80; }
+
+/* bot picker */
+.bot-pick { margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.bot-card {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; border-radius: 8px; border: 2px solid transparent;
+  background: var(--panel-row); text-align: left;
+}
+.bot-card:hover { border-color: var(--green); background: #2f3a26; }
+.bot-av { width: 44px; height: 44px; border-radius: 6px; background: #ffffff12; display: grid; place-items: center; font-size: 24px; flex-shrink: 0; }
+.bot-name { display: block; font-weight: 800; font-size: 16px; }
+.bot-tag { display: block; color: var(--text-2); font-size: 13px; margin-top: 2px; }
+.bot-go { margin-left: auto; background: var(--green); color: #fff; font-weight: 800; padding: 8px 14px; border-radius: 6px; box-shadow: 0 3px 0 var(--green-shadow); }
