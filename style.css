@@ -285,8 +285,8 @@ a { color: inherit; }
 /* ------------------------------------------------ modes, online lobby */
 .si-ic.globe { background: #2f7fb5; font-size: 15px; }
 .twist-opt .check.radio { font-size: 10px; color: #fff; }
-.play-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
-.play-choices .btn.big { font-size: 18px; padding: 14px 10px; }
+.play-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+.play-choices .btn.big { font-size: 16px; padding: 14px 8px; white-space: nowrap; }
 .btn.secondary { background: #4a4845; box-shadow: 0 4px 0 #2b2a28; }
 .local-opts { margin-top: 16px; color: var(--text-2); font-size: 14px; }
 .local-opts summary { cursor: pointer; font-weight: 700; color: var(--muted); margin-bottom: 10px; }

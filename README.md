@@ -31,6 +31,7 @@ With hidden pieces, the game judges everything using each piece's true identity,
 No install, no build step: **double-click `index.html`** and it opens in your browser.
 
 - **Pass & Play:** two players on one device. A privacy screen hides the board between turns.
+- **Play Bot:** play against **Bot v1**, the computer opponent, in any mode. You play White.
 - **Play Online:** click *Play Online → Create Game*, then *Copy invite link* and send it to a friend.
   Clicking the link joins your game instantly (or they can type the 5-letter code under *Join a game*). The creator plays White.
 - **Find Opponent:** *Play Online → Find Opponent* matches you with any other player searching for the same mode.

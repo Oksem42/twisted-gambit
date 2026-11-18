@@ -1,6 +1,7 @@
 (function () {
 const E = globalThis.TGEngine;
 const { pieceSVG, tokenSVG } = globalThis.TGPieces;
+const Bot = globalThis.TGBot;
 const { W, B, other, PIECE_NAME } = E;
 const COLOR = { w: 'White', b: 'Black' };
 
@@ -229,6 +230,7 @@ function beginOnline(mode, g, names) {
   if (ui.net) { clearTimeout(ui.net.timer); ui.net.onEarlyClose = null; }
   G = g;
   ui.online = true;
+  ui.bot = null;
   ui.lobbyOpen = false;
   closeModal();
   overlay.classList.add('hidden');
@@ -413,7 +415,7 @@ function capturedHTML(c) {
 const avatar = (c, cls = '') => `<div class="avatar ${c} ${cls}">${pieceSVG('P', c)}</div>`;
 
 function renderBar(el, c) {
-  const you = ui.online && c === ui.viewer ? ' · you' : '';
+  const you = (ui.online || ui.bot) && c === ui.viewer ? ' · you' : '';
   el.innerHTML = `
     ${avatar(c)}
     <div class="who">
@@ -594,8 +596,8 @@ function playCard() {
   if (ui.predict) return predictCard();
   const c = G.turn;
   if (G.turn !== ui.viewer) {
-    const msg = ui.online ? `Waiting for ${nm(c)} to move…` : `Pass the device to ${nm(c)}.`;
-    return `<div class="card"><h3>${ui.online ? '<span class="spinner"></span>' : ''}${msg}</h3>
+    const msg = ui.bot ? `${nm(c)} is thinking…` : ui.online ? `Waiting for ${nm(c)} to move…` : `Pass the device to ${nm(c)}.`;
+    return `<div class="card"><h3>${ui.online || ui.bot ? '<span class="spinner"></span>' : ''}${msg}</h3>
       ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
   }
   let hint = G.check === c ? '<b class="check-txt">Check!</b> You must get your king out of check.' : 'Click or drag a piece to move. Checkmate the king to win.';
@@ -618,7 +620,7 @@ function playCard() {
     if (E.prophecyReady(G, c) && G.bonusPending !== c && G.bonusNow !== c) btns.push('<button class="btn" data-act="prophecy">🔮 Use Prophecy</button>');
     if (btns.length) actions = `<div class="btn-row">${btns.join('')}</div>`;
   }
-  return `<div class="card"><h3><span class="dotlive"></span>${ui.online ? 'Your move' : `${nm(c)} to move`}</h3><p>${hint}</p>${actions}
+  return `<div class="card"><h3><span class="dotlive"></span>${ui.online || ui.bot ? 'Your move' : `${nm(c)} to move`}</h3><p>${hint}</p>${actions}
     ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
 }
 
@@ -671,6 +673,8 @@ function renderPanel() {
   if (ui.online && ui.net) {
     const ok = ui.net.status === 'connected';
     chips += `<span class="chip ${ok ? 'live' : 'down'}">${ok ? '● Online' : '● Disconnected'} · code ${esc(ui.net.code)}</span>`;
+  } else if (ui.bot && ui.phase !== 'menu') {
+    chips += `<span class="chip">🤖 vs ${esc(Bot.NAME)}</span>`;
   } else if (ui.phase !== 'menu') {
     chips += '<span class="chip">Pass &amp; play</span>';
   }
@@ -682,7 +686,7 @@ function renderPanel() {
     const items = secretItems(ui.viewer);
     body = connectionCard() + setupCard() + (items ? `<div class="card"><h3>🔒 Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else if (ui.phase === 'play') {
-    const showSecrets = ui.online || G.turn === ui.viewer;
+    const showSecrets = ui.online || ui.bot || G.turn === ui.viewer;
     const items = showSecrets ? secretItems(ui.viewer) : '';
     body = connectionCard() + drawOfferCard() + playCard() + (items ? `<div class="card"><h3>🔒 Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else {
@@ -782,6 +786,7 @@ function runSetup() {
   while (ui.setupQueue.length && !ui.setupQueue[0].steps.length) ui.setupQueue.shift();
   if (!ui.setupQueue.length) {
     ui.phase = 'play';
+    if (ui.bot) { startClock(G.turn); render(); return botTurn(); }
     render();
     return handoff(G.turn);
   }
@@ -793,6 +798,7 @@ function runSetup() {
 
 function startLocalGame(mode) {
   netTeardown();
+  ui.bot = null;
   ui.gameMode = mode;
   store.set('mode', mode);
   G = E.newGame({ [mode]: true });
@@ -805,7 +811,50 @@ function startLocalGame(mode) {
   runSetup();
 }
 
+// ---------------------------------------------------------------- bot games
+function startBotGame(mode) {
+  netTeardown();
+  ui.gameMode = mode;
+  store.set('mode', mode);
+  G = E.newGame({ [mode]: true });
+  ui.bot = { color: B };
+  ui.viewer = W;
+  ui.names = { w: ui.myName || ui.localNames.w || 'You', b: Bot.NAME };
+  ui.clock = { w: 0, b: 0, running: null, since: 0 };
+  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false });
+  Bot.setup(G, ui.bot.color);
+  const steps = setupSteps();
+  ui.setupQueue = steps.length ? [{ color: W, steps: [...steps], started: true }] : [];
+  closeModal();
+  overlay.classList.add('hidden');
+  runSetup();
+}
+
+let botTimer = null;
+function botTurn() {
+  clearTimeout(botTimer);
+  if (!ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
+  const game = G;
+  botTimer = setTimeout(() => {
+    if (G !== game || !ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
+    const action = Bot.chooseAction(G);
+    if (!action) return;
+    const before = capturesNow();
+    try {
+      if (action.type === 'swap') { E.doSwap(G, action.a, action.b); sound('reveal'); ui.anim = null; }
+      else {
+        E.makeMove(G, action.move);
+        sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
+        ui.anim = slidesFor(action.move);
+      }
+    } catch { return; }
+    ui.fresh = null;
+    afterAction();
+  }, 450 + Math.random() * 800);
+}
+
 function rematch() {
+  if (ui.bot) return startBotGame(ui.gameMode);
   if (!ui.online) return startLocalGame(ui.gameMode);
   if (!ui.net || ui.net.status !== 'connected') { ui.flash = 'Your opponent is no longer connected.'; return render(); }
   if (ui.net.role === 'host') return startOnlineGame(ui.gameMode);
@@ -817,6 +866,7 @@ function rematch() {
 function afterAction() {
   ui.selected = null; ui.moves = []; ui.tool = null; ui.swapFirst = null;
   if (G.result) return gameOver();
+  if (ui.bot) { startClock(G.turn); render(); return botTurn(); }
   if (ui.online || G.turn === ui.viewer) { startClock(G.turn); return render(); } // online, or a bonus move
   stopClock();
   render();
@@ -985,7 +1035,7 @@ panel.addEventListener('click', (e) => {
         if (!ui.setupQueue[0].steps.length) return markReady();
         return render();
       }
-      return runSetup();
+      return runSetup(); // also finishes a bot game's setup
     }
     case 'cancel': ui.tool = null; ui.swapFirst = null; ui.selected = null; ui.moves = []; return render();
     case 'prophecy': ui.tool = 'prophecy'; ui.selected = null; ui.moves = []; return render();
@@ -1010,6 +1060,17 @@ panel.addEventListener('click', (e) => {
       if (confirm(`${ui.names[c]}, resign this game?`)) { E.resign(G, c); sendAct({ kind: 'resign', color: c }); gameOver(); }
       return;
     case 'draw':
+      if (ui.bot) {
+        ui.flash = 'Draw offered…';
+        render();
+        setTimeout(() => {
+          if (!ui.bot || G.result) return;
+          if (Bot.acceptsDraw(G)) { E.agreeDraw(G); return gameOver(); }
+          ui.flash = `${ui.names[ui.bot.color]} declined the draw.`;
+          render();
+        }, 700 + Math.random() * 600);
+        return;
+      }
       if (ui.online) { sendAct({ kind: 'drawOffer' }); ui.flash = 'Draw offered. Waiting for an answer…'; return render(); }
       if (confirm(`Does ${ui.names[other(c)]} agree to a draw?`)) { E.agreeDraw(G); gameOver(); }
       return;
@@ -1043,6 +1104,7 @@ function openNewGame() {
           </button>`).join('')}</div>
         <div class="play-choices">
           <button class="btn primary big" id="play-online">🌐 Play Online</button>
+          <button class="btn big secondary" id="play-bot">🤖 Play Bot</button>
           <button class="btn big secondary" id="play-local">👥 Pass &amp; Play</button>
         </div>
         <details class="local-opts">
@@ -1056,6 +1118,7 @@ function openNewGame() {
       </div></div>`;
     modal.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { saveForm(); mode = b.dataset.mode; draw(); }));
     $('play-local').addEventListener('click', () => { saveForm(); startLocalGame(mode); });
+    $('play-bot').addEventListener('click', () => { saveForm(); startBotGame(mode); });
     $('play-online').addEventListener('click', () => { saveForm(); ui.gameMode = mode; store.set('mode', mode); openLobby(); });
   };
   const saveForm = () => {
