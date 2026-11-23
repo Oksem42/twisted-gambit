@@ -375,3 +375,7 @@ a { color: inherit; }
 .bot-name { display: block; font-weight: 800; font-size: 16px; }
 .bot-tag { display: block; color: var(--text-2); font-size: 13px; margin-top: 2px; }
 .bot-go { margin-left: auto; background: var(--green); color: #fff; font-weight: 800; padding: 8px 14px; border-radius: 6px; box-shadow: 0 3px 0 var(--green-shadow); }
+
+/* premoves */
+.sq.pre.light { background: #e8877c; }
+.sq.pre.dark { background: #cf5f52; }

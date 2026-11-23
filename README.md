@@ -33,6 +33,7 @@ With hidden pieces, the game judges everything using each piece's true identity,
 No install, no build step: **double-click `index.html`** and it opens in your browser.
 
 - **Pass & Play:** two players on one device. A privacy screen hides the board between turns.
+- **Premoves:** in online and bot games, move during your opponent's turn to queue moves (shown in red). Right-click to cancel.
 - **Play Bot:** play a computer opponent in any mode (you play White):
   - **Bot v1**, a friendly sparring partner.
   - **Jules**, a real chess engine: alpha-beta search with iterative deepening, quiescence search, a transposition table and move-ordering heuristics, thinking up to about 2.5 seconds a move. It plays every mode deliberately (mines on your knights' squares, your queen as its traitor, a pawn shapeshifter, searched traitor moves and swaps, prophecies from its own analysis, steering toward its hidden objective). It plays fair: it only knows what Black can see.

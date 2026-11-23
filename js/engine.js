@@ -551,6 +551,23 @@ function doSwap(s, a, b) {
   afterTurn(s, entry);
 }
 
+/** Squares a piece could ever reach from `from`, ignoring other pieces: what a premove may aim at. */
+function premoveTargets(type, from, color) {
+  const out = [], f0 = fileOf(from), r0 = rankOf(from);
+  const add = (f, r) => { if (onBoard(f, r)) out.push(sq(f, r)); };
+  const rays = (dirs) => { for (const [df, dr] of dirs) for (let k = 1; k < 8; k++) add(f0 + df * k, r0 + dr * k); };
+  if (type === 'N') for (const [df, dr] of KNIGHT) add(f0 + df, r0 + dr);
+  if (type === 'K') for (const [df, dr] of KING) add(f0 + df, r0 + dr);
+  if (type === 'R' || type === 'Q') rays(ROOK);
+  if (type === 'B' || type === 'Q') rays(BISHOP);
+  if (type === 'P') {
+    const d = fwd(color);
+    add(f0, r0 + d); add(f0 - 1, r0 + d); add(f0 + 1, r0 + d);
+    if (r0 === pawnRank(color)) add(f0, r0 + 2 * d);
+  }
+  return out;
+}
+
 function resign(s, c) { end(s, other(c), 'won by resignation'); }
 
 /** Whether `c` still has enough material to ever checkmate (bare king, or king + one minor piece, can't). */
@@ -570,6 +587,6 @@ function agreeDraw(s) { end(s, null, 'agreement'); }
 globalThis.TGEngine = {
   W, B, other, FILES, sq, fileOf, rankOf, sqName, PIECE_NAME, PIECE_VALUE, PROMOTIONS, OBJECTIVES, objectiveById,
   newGame, prophecyReady, prophecyWait, PROPHECY_RECHARGE, setHiddenQueen, setTraitor, toggleMine, setMines, setShifter, MINES, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
-  resign, agreeDraw, timeout, canCheckmate, positionKey, insufficientMaterial,
+  premoveTargets, resign, agreeDraw, timeout, canCheckmate, positionKey, insufficientMaterial,
 };
 })();

@@ -48,6 +48,7 @@ const ui = {
   sound: store.get('sound', true), showResult: false,
   clock: { w: 0, b: 0, running: null, since: 0 },
   // online
+  premoves: [], preSel: false,
   online: false, net: null, ready: { w: false, b: false }, drawOffered: false, lobbyOpen: false,
 };
 if (!MODES.some((m) => m.key === ui.gameMode)) ui.gameMode = 'hiddenQueen';
@@ -337,7 +338,7 @@ function beginOnline(mode, g, names) {
   ui.viewer = ui.net.myColor;
   ui.clock = { w: 0, b: 0, running: null, since: 0 };
   ui.ready = { w: false, b: false };
-  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false });
+  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false, premoves: [], preSel: false });
   const steps = setupSteps();
   ui.setupQueue = steps.length ? [{ color: ui.viewer, steps, started: true }] : [];
   ui.phase = 'secret';
@@ -448,6 +449,8 @@ function renderBoard() {
   const flip = (ui.viewer === B) !== ui.flipped;
   const targets = new Map(ui.moves.map((m) => [m.to, m]));
   const { pickable, picked } = pickSets();
+  const shown = ui.premoves.length ? preBoard() : G.board; // queued premoves are drawn as if played
+  const preSquares = new Set(ui.premoves.flatMap((q) => [q.from, q.to]));
   let html = '';
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
@@ -457,11 +460,12 @@ function renderBoard() {
       if ((lm && ui.phase !== 'menu' && (lm.from === i || lm.to === i)) || ui.selected === i) cls.push('hl');
       if (picked.has(i)) cls.push('pick');
       if (pickable.has(i)) cls.push('pickable');
-      const p = G.board[i];
+      if (preSquares.has(i)) cls.push('pre');
+      const p = shown[i], real = G.board[i];
       let inner = '';
       if (col === 0) inner += `<span class="coord rank">${r + 1}</span>`;
       if (row === 7) inner += `<span class="coord file">${E.FILES[f]}</span>`;
-      if (p && p.type === 'K' && G.check === p.owner && ui.phase !== 'menu') cls.push('incheck');
+      if (real && real.type === 'K' && G.check === real.owner && ui.phase !== 'menu') cls.push('incheck');
       if (p) inner += pieceHTML(p, ui.fresh === i ? 'fresh' : '');
       const m = targets.get(i);
       if (m) inner += p || m.ep ? '<span class="ring"></span>' : '<span class="dot"></span>';
@@ -700,6 +704,9 @@ function playCard() {
   if (G.turn !== ui.viewer) {
     const msg = ui.bot ? `${nm(c)} is thinking…` : ui.online ? `Waiting for ${nm(c)} to move…` : `Pass the device to ${nm(c)}.`;
     return `<div class="card"><h3>${ui.online || ui.bot ? '<span class="spinner"></span>' : ''}${msg}</h3>
+      ${ui.online || ui.bot ? (ui.premoves.length
+        ? `<p>${ui.premoves.length} premove${ui.premoves.length === 1 ? '' : 's'} queued.</p><button class="btn small" data-act="premove-clear">Cancel premoves</button>`
+        : '<p>Move a piece now to premove it. Right-click to cancel.</p>') : ''}
       ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
   }
   let hint = G.check === c ? '<b class="check-txt">Check!</b> You must get your king out of check.' : 'Click or drag a piece to move. Checkmate the king to win.';
@@ -906,7 +913,7 @@ function startLocalGame(mode) {
   G = E.newGame({ [mode]: true });
   ui.names = { ...ui.localNames };
   ui.clock = { w: 0, b: 0, running: null, since: 0 };
-  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false });
+  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false, premoves: [], preSel: false });
   const steps = setupSteps();
   ui.setupQueue = steps.length ? [W, B].map((c) => ({ color: c, steps: [...steps], started: false })) : [];
   closeModal();
@@ -924,7 +931,7 @@ function startBotGame(mode, id = 'v1') {
   ui.viewer = W;
   ui.names = { w: ui.myName || ui.localNames.w || 'You', b: BOTS[id].name };
   ui.clock = { w: 0, b: 0, running: null, since: 0 };
-  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false });
+  Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false, premoves: [], preSel: false });
   BOTS[id].engine.setup(G, ui.bot.color);
   const steps = setupSteps();
   ui.setupQueue = steps.length ? [{ color: W, steps: [...steps], started: true }] : [];
@@ -934,27 +941,55 @@ function startBotGame(mode, id = 'v1') {
 }
 
 let botTimer = null;
+// Jules searches in a background worker so you can premove while it thinks.
+let julesWorker = null, julesBroken = false, julesAsk = 0;
+function julesThink(game, ms) {
+  return new Promise((resolve) => {
+    const onMain = () => { let a = null; try { a = Jules.chooseAction(game, { ms }); } catch { /* fall through */ } resolve(a); };
+    if (julesBroken) return setTimeout(onMain, 30);
+    try { julesWorker = julesWorker || new Worker('js/jules-worker.js'); } catch { julesBroken = true; return setTimeout(onMain, 30); }
+    const id = ++julesAsk, w = julesWorker;
+    let done = false;
+    const finish = (fn) => { if (done) return; done = true; clearTimeout(guard); w.removeEventListener('message', onMsg); w.removeEventListener('error', onErr); fn(); };
+    const onMsg = (e) => { if (e.data.id === id) finish(() => resolve(e.data.action)); };
+    const onErr = () => finish(() => { julesBroken = true; julesWorker = null; onMain(); }); // e.g. opened straight from a file
+    const guard = setTimeout(onErr, ms + 4000);
+    w.addEventListener('message', onMsg);
+    w.addEventListener('error', onErr);
+    w.postMessage({ id, game: structuredClone(game), ms });
+  });
+}
+
+function botPlay(game, action) {
+  if (G !== game || !ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
+  action = action || Bot.chooseAction(G);
+  if (!action) return;
+  const before = capturesNow();
+  try {
+    if (action.type === 'swap') { E.doSwap(G, action.a, action.b); sound('reveal'); ui.anim = null; }
+    else {
+      E.makeMove(G, action.move);
+      sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
+      ui.anim = slidesFor(action.move);
+    }
+  } catch { return; }
+  ui.fresh = null;
+  afterAction();
+}
+
 function botTurn() {
   clearTimeout(botTimer);
   if (!ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
   const game = G;
-  botTimer = setTimeout(() => {
-    if (G !== game || !ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
-    const thinkMs = Math.max(300, Math.min(2500, timeLeft(ui.bot.color) / 25));
-    const action = (ui.bot.id === 'jules' && Jules.chooseAction(G, { ms: thinkMs })) || Bot.chooseAction(G);
-    if (!action) return;
-    const before = capturesNow();
-    try {
-      if (action.type === 'swap') { E.doSwap(G, action.a, action.b); sound('reveal'); ui.anim = null; }
-      else {
-        E.makeMove(G, action.move);
-        sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
-        ui.anim = slidesFor(action.move);
-      }
-    } catch { return; }
-    ui.fresh = null;
-    afterAction();
-  }, ui.bot.id === 'jules' ? 80 : 450 + Math.random() * 800); // Jules spends its time thinking instead
+  if (ui.bot.id === 'jules') {
+    botTimer = setTimeout(() => {
+      if (G !== game || !ui.bot || G.turn !== ui.bot.color) return;
+      const thinkMs = Math.max(300, Math.min(2500, timeLeft(ui.bot.color) / 25));
+      julesThink(G, thinkMs).then((action) => botPlay(game, action));
+    }, 80);
+  } else {
+    botTimer = setTimeout(() => botPlay(game, Bot.chooseAction(game)), 450 + Math.random() * 800);
+  }
 }
 
 function rematch() {
@@ -968,10 +1003,13 @@ function rematch() {
 }
 
 function afterAction() {
-  ui.selected = null; ui.moves = []; ui.tool = null; ui.swapFirst = null;
+  // A piece picked up during the opponent's turn stays picked up when your turn starts.
+  const held = ui.preSel && !ui.premoves.length && G.turn === ui.viewer && !G.result ? ui.selected : null;
+  ui.selected = null; ui.moves = []; ui.tool = null; ui.swapFirst = null; ui.preSel = false;
   if (G.result) return gameOver();
-  if (ui.bot) { startClock(G.turn); render(); return botTurn(); }
-  if (ui.online || G.turn === ui.viewer) { startClock(G.turn); return render(); } // online, or a bonus move
+  if (held != null && G.board[held] && G.board[held].owner === ui.viewer) { ui.selected = held; ui.moves = E.legalMoves(G, held); }
+  if (ui.bot) { startClock(G.turn); render(); runPremove(); return botTurn(); }
+  if (ui.online || G.turn === ui.viewer) { startClock(G.turn); render(); return runPremove(); } // online, or a bonus move
   stopClock();
   render();
   setTimeout(() => handoff(G.turn), ui.privacy ? 650 : 250);
@@ -982,6 +1020,8 @@ function gameOver() {
   ui.phase = 'over';
   ui.showResult = true;
   ui.drawOffered = false;
+  clearTimeout(preTimer);
+  ui.premoves = []; ui.preSel = false;
   ui.selected = null; ui.moves = []; ui.tool = null;
   overlay.classList.add('hidden');
   sound('end');
@@ -1020,7 +1060,83 @@ function doMove(m, dropped = false) {
 }
 
 function canAct() {
-  return ui.phase === 'play' && !G.result && G.turn === ui.viewer && overlay.classList.contains('hidden');
+  return ui.phase === 'play' && !G.result && G.turn === ui.viewer && !ui.premoves.length && overlay.classList.contains('hidden');
+}
+
+// ---------------------------------------------------------------- premoves (online and bot games)
+let preTimer = null;
+const canPremove = () => (ui.online || !!ui.bot) && ui.phase === 'play' && !G.result && G.turn !== ui.viewer
+  && !ui.predict && overlay.classList.contains('hidden');
+
+/** The board as it will look once the queued premoves are played. */
+function preBoard() {
+  const b = G.board.slice();
+  for (const q of ui.premoves) {
+    const p = b[q.from];
+    if (!p) break;
+    const moved = { ...p, moved: true };
+    if (moved.type === 'P' && E.rankOf(q.to) === (moved.owner === W ? 7 : 0)) { moved.type = 'Q'; moved.shown = 'Q'; } // auto-queen
+    b[q.from] = null;
+    b[q.to] = moved;
+    if (q.castle) { b[q.castle[1]] = { ...b[q.castle[0]], moved: true }; b[q.castle[0]] = null; }
+  }
+  return b;
+}
+function preTargets(i) {
+  const b = preBoard(), p = b[i];
+  const out = E.premoveTargets(p.type, i, p.owner).map((to) => ({ from: i, to }));
+  const home = p.owner === W ? 0 : 7;
+  if (p.type === 'K' && !p.moved && i === E.sq(4, home)) {
+    for (const [kf, rf, rt] of [[6, 7, 5], [2, 0, 3]]) {
+      const rook = b[E.sq(rf, home)];
+      if (rook && rook.owner === p.owner && rook.type === 'R' && !rook.moved) {
+        out.push({ from: i, to: E.sq(kf, home), castle: [E.sq(rf, home), E.sq(rt, home)] });
+      }
+    }
+  }
+  return out;
+}
+function queuePremove(t) {
+  const p = preBoard()[t.from];
+  if (!p) return;
+  ui.premoves.push({ from: t.from, to: t.to, id: p.id, castle: t.castle });
+  ui.selected = null; ui.moves = []; ui.preSel = false;
+  sound('move');
+  render();
+}
+function clearPremoves(flash) {
+  clearTimeout(preTimer);
+  ui.premoves = [];
+  ui.selected = null; ui.moves = []; ui.preSel = false;
+  if (flash) ui.flash = flash;
+  render();
+}
+/** On your turn, play the next queued premove if it's legal now; otherwise drop the whole queue, like chess.com. */
+function runPremove() {
+  clearTimeout(preTimer);
+  if (!ui.premoves.length || G.turn !== ui.viewer || ui.phase !== 'play') return;
+  const game = G;
+  preTimer = setTimeout(() => {
+    if (G !== game || !ui.premoves.length || G.turn !== ui.viewer || ui.phase !== 'play') return;
+    const q = ui.premoves[0], p = G.board[q.from];
+    const legal = p && p.id === q.id ? E.legalMoves(G, q.from).find((m) => m.to === q.to) : null;
+    if (!legal) return clearPremoves('Premove wasn\'t legal, so it was cancelled.');
+    ui.premoves.shift();
+    doMove({ ...legal, promo: legal.promo ? 'Q' : undefined }, true); // already drawn in place
+  }, 110);
+}
+function onPremoveDown(i, e) {
+  const b = preBoard(), p = b[i];
+  const mine = p && p.owner === ui.viewer;
+  const t = ui.selected != null && ui.selected !== i ? ui.moves.find((x) => x.to === i) : null;
+  if (t && !mine) return queuePremove(t);
+  if (!mine) return clearPremoves(); // clicking elsewhere cancels, like chess.com
+  ui.selected = i; ui.preSel = true;
+  ui.moves = preTargets(i);
+  ui.fresh = null;
+  render();
+  const src = boardEl.querySelector(`[data-sq="${i}"] .pc`);
+  if (src) drag = { from: i, x: e.clientX, y: e.clientY, moved: false, src, pre: true, targets: ui.moves.slice() };
 }
 
 function onSwapClick(i) {
@@ -1050,10 +1166,15 @@ const setHover = (el) => {
   if (hoverEl) hoverEl.classList.add('hover');
 };
 
+boardEl.addEventListener('contextmenu', (e) => { if (ui.phase === 'play') e.preventDefault(); });
 boardEl.addEventListener('pointerdown', (e) => {
   const el = e.target.closest('.sq');
   if (!el) return;
   e.preventDefault();
+  if (e.button > 0) { // right-click cancels premoves
+    if (e.button === 2 && (ui.premoves.length || ui.preSel)) clearPremoves();
+    return;
+  }
   const i = +el.dataset.sq;
   if (ui.promo) { ui.promo = null; return render(); }
   if (ui.predict) {
@@ -1071,6 +1192,7 @@ boardEl.addEventListener('pointerdown', (e) => {
     if (step === 'shifter') E.setShifter(G, ui.viewer, i);
     return render();
   }
+  if (canPremove()) return onPremoveDown(i, e);
   if (!canAct()) return;
   if (ui.tool === 'swap') return onSwapClick(i);
   if (ui.selected != null) {
@@ -1114,6 +1236,16 @@ window.addEventListener('pointerup', (e) => {
   ghost.className = 'pc drag-ghost hidden';
   if (!d.moved) return;
   const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.sq');
+  if (d.pre) {
+    const t = el && d.targets.find((x) => x.to === +el.dataset.sq);
+    if (!t) { ui.selected = null; ui.moves = []; ui.preSel = false; return render(); }
+    if (canAct()) { // the opponent moved mid-drag: this is a normal move now
+      const legal = E.legalMoves(G, t.from).find((x) => x.to === t.to);
+      if (legal) return doMove(legal, legal.promo !== true);
+      return render();
+    }
+    return queuePremove(t);
+  }
   const m = el && ui.moves.find((x) => x.to === +el.dataset.sq);
   if (m) doMove(m, m.promo !== true); // dragged pieces are already in place: no slide
   else render();
@@ -1143,6 +1275,7 @@ panel.addEventListener('click', (e) => {
       }
       return runSetup(); // also finishes a bot game's setup
     }
+    case 'premove-clear': return clearPremoves();
     case 'cancel': ui.tool = null; ui.swapFirst = null; ui.selected = null; ui.moves = []; return render();
     case 'prophecy': ui.tool = 'prophecy'; ui.selected = null; ui.moves = []; return render();
     case 'predict-ok': {
@@ -1371,6 +1504,7 @@ function openRules() {
         <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Clock:</b> each player has 10 minutes for the whole game, counting down on their turn. Run out and you lose, unless your opponent only has a king (or a king and one bishop or knight), which is a draw.</li>
+        <li><b>Premoves:</b> in online and bot games, move during your opponent's turn to queue one or more moves, shown in red. Each plays instantly on your turn if it's legal; if one isn't, the whole queue is cancelled. Pawns auto-promote to a queen. Right-click, or click an empty square, to cancel.</li>
         <li><b>Pass &amp; play:</b> a privacy screen hides the board between turns so the next player can take the device.</li>
         <li><b>Online:</b> create a game and send the invite link (or 5-letter code), or press <b>Find Opponent</b> to be matched with a random player in the same mode.</li>
       </ul>
