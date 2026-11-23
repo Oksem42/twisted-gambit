@@ -1,30 +1,31 @@
 (function () {
 const E = globalThis.TGEngine;
 const { pieceSVG, tokenSVG } = globalThis.TGPieces;
+const I = globalThis.TGIcons;
 const Bot = globalThis.TGBot;
 const Jules = globalThis.TGJules;
 const BOTS = {
-  v1: { engine: Bot, name: Bot.NAME, tag: 'A friendly sparring partner', icon: '🤖' },
-  jules: { engine: Jules, name: Jules.NAME, tag: 'Best chess player of all time', icon: '👑' },
+  v1: { engine: Bot, name: Bot.NAME, tag: 'A friendly sparring partner', icon: I.robot },
+  jules: { engine: Jules, name: Jules.NAME, tag: 'Best chess player of all time', icon: I.crown },
 };
 const { W, B, other, PIECE_NAME } = E;
 const COLOR = { w: 'White', b: 'Black' };
 
 // Each twist is its own game mode.
 const MODES = [
-  { key: 'hiddenQueen', name: 'Secret Queen', icon: '♛',
+  { key: 'hiddenQueen', name: 'Secret Queen', icon: I.queen,
     desc: 'You keep your normal queen and get a second, secret queen disguised as one of your pawns. It stays a "pawn" as long as it moves like one, and is revealed the moment it makes a queen move.' },
-  { key: 'traitor', name: 'Traitor', icon: '🗡',
+  { key: 'traitor', name: 'Traitor', icon: I.traitor,
     desc: 'Secretly mark one enemy piece. Once per game, take control of it for a single move, even to capture its own teammates.' },
-  { key: 'objective', name: 'Hidden Objective', icon: '🎯',
+  { key: 'objective', name: 'Hidden Objective', icon: I.objective,
     desc: 'Each player draws a secret goal. Complete it, or checkmate the king, to win.' },
-  { key: 'swap', name: 'Secret Swap', icon: '⇄',
+  { key: 'swap', name: 'Secret Swap', icon: I.swap,
     desc: 'Once per game, swap the identities of two of your pieces. To your opponent they keep their old look.' },
-  { key: 'mines', name: 'Landmine', icon: '💣',
+  { key: 'mines', name: 'Landmine', icon: I.mine,
     desc: "Each player secretly plants 2 mines in the opponent's half. Any enemy piece except the king that lands on one is blown up." },
-  { key: 'prophecy', name: 'Prophecy', icon: '🔮',
+  { key: 'prophecy', name: 'Prophecy', icon: I.prophecy,
     desc: "After your move, secretly predict your opponent's reply. If they play exactly that, you get a double move. Recharges 5 turns after each use." },
-  { key: 'shifter', name: 'Shapeshifter', icon: '🦎',
+  { key: 'shifter', name: 'Shapeshifter', icon: I.shifter,
     desc: 'Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look.' },
 ];
 const modeInfo = (k) => MODES.find((m) => m.key === k) || MODES[0];
@@ -409,8 +410,8 @@ function pieceHTML(p, extra = '') {
   }
   for (const c of omni ? [W, B] : [ui.viewer]) {
     const tr = G.traitor[c];
-    if (tr && tr.id === p.id && !tr.used) badges += `<span class="badge dagger" title="${COLOR[c]}'s traitor">🗡</span>`;
-    if (G.shifter && G.shifter[c] === p.id) badges += `<span class="badge lizard" title="${COLOR[c]}'s shapeshifter">🦎</span>`;
+    if (tr && tr.id === p.id && !tr.used) badges += `<span class="badge dagger" title="${COLOR[c]}'s traitor">${I.traitor}</span>`;
+    if (G.shifter && G.shifter[c] === p.id) badges += `<span class="badge lizard" title="${COLOR[c]}'s shapeshifter">${I.shifter}</span>`;
   }
   return `<div class="pc ${p.owner} ${extra}">${t ? pieceSVG(t, p.owner) : tokenSVG(p.owner)}${badges}</div>`;
 }
@@ -469,8 +470,8 @@ function renderBoard() {
       if (p) inner += pieceHTML(p, ui.fresh === i ? 'fresh' : '');
       const m = targets.get(i);
       if (m) inner += p || m.ep ? '<span class="ring"></span>' : '<span class="dot"></span>';
-      if (ui.phase !== 'menu' && (isOmni() ? [W, B] : [ui.viewer]).some((c) => G.mines[c].includes(i))) inner += '<span class="mine" title="Mine">💣</span>';
-      if (ui.phase !== 'menu' && G.lastExplosion === i) inner += '<span class="boom">💥</span>';
+      if (ui.phase !== 'menu' && (isOmni() ? [W, B] : [ui.viewer]).some((c) => G.mines[c].includes(i))) inner += `<span class="mine" title="Mine">${I.mine}</span>`;
+      if (ui.phase !== 'menu' && G.lastExplosion === i) inner += `<span class="boom">${I.boom}</span>`;
       html += `<div class="${cls.join(' ')}" data-sq="${i}">${inner}</div>`;
     }
   }
@@ -487,25 +488,25 @@ function publicChips(c) {
   if (t.hiddenQueen) {
     const id = G.hiddenQueen[c];
     const f = E.findById(G, id);
-    return `<span class="chip ${id == null || (f && f.piece.shown === 'P') ? '' : 'spent'}" title="Secret queen">♛ secret queen</span>`;
+    return `<span class="chip ${id == null || (f && f.piece.shown === 'P') ? '' : 'spent'}" title="Secret queen">${I.queen} secret queen</span>`;
   }
   if (t.traitor) {
     const tr = G.traitor[c];
     const spent = tr && (tr.used || !E.findById(G, tr.id));
-    return `<span class="chip ${spent ? 'spent' : ''}" title="Traitor">🗡 traitor</span>`;
+    return `<span class="chip ${spent ? 'spent' : ''}" title="Traitor">${I.traitor} traitor</span>`;
   }
-  if (t.swap) return `<span class="chip ${G.swapUsed[c] ? 'spent' : ''}" title="Secret swap">⇄ swap</span>`;
-  if (t.objective) return '<span class="chip" title="Secret objective">🎯 objective</span>';
-  if (t.mines) return `<span class="chip ${G.mines[c].length ? '' : 'spent'}" title="Hidden mines left">💣 ×${G.mines[c].length}</span>`;
+  if (t.swap) return `<span class="chip ${G.swapUsed[c] ? 'spent' : ''}" title="Secret swap">${I.swap} swap</span>`;
+  if (t.objective) return `<span class="chip" title="Secret objective">${I.objective} objective</span>`;
+  if (t.mines) return `<span class="chip ${G.mines[c].length ? '' : 'spent'}" title="Hidden mines left">${I.mine} ×${G.mines[c].length}</span>`;
   if (t.prophecy) {
     const wait = E.prophecyWait(G, c);
     return wait
-      ? `<span class="chip spent-soft" title="Prophecy recharging">🔮 in ${wait}</span>`
-      : '<span class="chip" title="Prophecy">🔮 prophecy</span>';
+      ? `<span class="chip spent-soft" title="Prophecy recharging">${I.prophecy} in ${wait}</span>`
+      : `<span class="chip" title="Prophecy">${I.prophecy} prophecy</span>`;
   }
   if (t.shifter) {
     const id = G.shifter[c];
-    return `<span class="chip ${id != null && !E.findById(G, id) ? 'spent' : ''}" title="Shapeshifter">🦎 shapeshifter</span>`;
+    return `<span class="chip ${id != null && !E.findById(G, id) ? 'spent' : ''}" title="Shapeshifter">${I.shifter} shapeshifter</span>`;
   }
   return '';
 }
@@ -528,7 +529,7 @@ function renderBar(el, c) {
       <div class="name"><span class="nm">${nm(c)}</span><span class="tag">(${COLOR[c]}${you})</span><span class="chips">${publicChips(c)}</span></div>
       <div class="caps">${capturedHTML(c)}</div>
     </div>
-    <div class="clock" data-c="${c}"><span class="ci">⏱</span><span class="ct">${fmtLeft(c)}</span></div>`;
+    <div class="clock" data-c="${c}"><span class="ci">${I.clock}</span><span class="ct">${fmtLeft(c)}</span></div>`;
 }
 
 function renderPromo() {
@@ -617,15 +618,15 @@ function secretItems(c) {
   if (t.objective) {
     const o = E.objectiveById(G.objectives[c]);
     const prog = Math.min(o.progress(G, c), o.goal);
-    items.push(`<li><span class="ic">🎯</span><div><b>${o.text}</b>
+    items.push(`<li><span class="ic">${I.objective}</span><div><b>${o.text}</b>
       <div class="progress"><i style="width:${(prog / o.goal) * 100}%"></i></div></div></li>`);
   }
-  if (t.hiddenQueen) items.push(`<li><span class="ic">♛</span><div>Secret queen: <b>${queenDesc(c)}</b></div></li>`);
-  if (t.traitor) items.push(`<li><span class="ic">🗡</span><div>Traitor: <b>${traitorDesc(c)}</b></div></li>`);
-  if (t.swap) items.push(`<li><span class="ic">⇄</span><div>Secret swap: <b>${G.swapUsed[c] ? 'used' : 'ready'}</b></div></li>`);
+  if (t.hiddenQueen) items.push(`<li><span class="ic">${I.queen}</span><div>Secret queen: <b>${queenDesc(c)}</b></div></li>`);
+  if (t.traitor) items.push(`<li><span class="ic">${I.traitor}</span><div>Traitor: <b>${traitorDesc(c)}</b></div></li>`);
+  if (t.swap) items.push(`<li><span class="ic">${I.swap}</span><div>Secret swap: <b>${G.swapUsed[c] ? 'used' : 'ready'}</b></div></li>`);
   if (t.mines) {
     const left = G.mines[c].map(E.sqName);
-    items.push(`<li><span class="ic">💣</span><div>Your mines: <b>${left.length ? left.join(', ') : ui.phase === 'secret' ? 'none yet' : 'all used up'}</b></div></li>`);
+    items.push(`<li><span class="ic">${I.mine}</span><div>Your mines: <b>${left.length ? left.join(', ') : ui.phase === 'secret' ? 'none yet' : 'all used up'}</b></div></li>`);
   }
   if (t.prophecy) {
     const pr = G.prophecy[c];
@@ -634,13 +635,13 @@ function secretItems(c) {
     const txt = !pr ? 'ready: use it on your turn'
       : pr.state === 'active' ? `waiting: you predicted ${E.sqName(pr.from)} → ${E.sqName(pr.to)}`
       : (pr.state === 'hit' ? 'last one came true!' : 'last one missed.') + again;
-    items.push(`<li><span class="ic">🔮</span><div>Prophecy: <b>${txt}</b></div></li>`);
+    items.push(`<li><span class="ic">${I.prophecy}</span><div>Prophecy: <b>${txt}</b></div></li>`);
   }
   if (t.shifter) {
     const id = G.shifter[c], f = E.findById(G, id);
     const txt = id == null ? 'not chosen yet' : !f ? 'captured'
       : `${PIECE_NAME[f.piece.type]} on ${E.sqName(f.sq)}${f.piece.shown !== f.piece.type ? `, disguised as a ${PIECE_NAME[f.piece.shown]}` : ''}`;
-    items.push(`<li><span class="ic">🦎</span><div>Shapeshifter: <b>${txt}</b></div></li>`);
+    items.push(`<li><span class="ic">${I.shifter}</span><div>Shapeshifter: <b>${txt}</b></div></li>`);
   }
   return items.join('');
 }
@@ -653,29 +654,29 @@ function setupCard() {
   }
   const head = `<div class="eyebrow">${nm(c)} · secret setup</div>`;
   if (step === 'hiddenQueen') {
-    return `<div class="card alert">${head}<h3>♛ Pick your secret queen</h3>
+    return `<div class="card alert">${head}<h3>${I.queen} Pick your secret queen</h3>
       <p>Click one of your pawns. It secretly becomes a second queen. It keeps looking like a pawn while it moves like one, and is revealed the moment it makes a queen move.</p>
       <button class="btn primary big" data-act="confirm" ${G.hiddenQueen[c] == null ? 'disabled' : ''}>Confirm</button></div>`;
   }
   if (step === 'traitor') {
-    return `<div class="card alert">${head}<h3>🗡 Choose your traitor</h3>
+    return `<div class="card alert">${head}<h3>${I.traitor} Choose your traitor</h3>
       <p>Click one enemy piece (not the king). Once per game, on your turn, you can move it as if it were yours.</p>
       <button class="btn primary big" data-act="confirm" ${G.traitor[c] == null ? 'disabled' : ''}>Confirm</button></div>`;
   }
   if (step === 'mines') {
     const n = G.mines[c].length;
-    return `<div class="card alert">${head}<h3>💣 Plant your mines</h3>
+    return `<div class="card alert">${head}<h3>${I.mine} Plant your mines</h3>
       <p>Click ${E.MINES} squares in your opponent's half of the board (click again to move one). Any enemy piece except the king that lands on a mine is blown up. Your opponent can't see them.</p>
       <button class="btn primary big" data-act="confirm" ${n === E.MINES ? '' : 'disabled'}>${n === E.MINES ? 'Confirm' : `Pick ${E.MINES - n} more`}</button></div>`;
   }
   if (step === 'shifter') {
-    return `<div class="card alert">${head}<h3>🦎 Choose your shapeshifter</h3>
+    return `<div class="card alert">${head}<h3>${I.shifter} Choose your shapeshifter</h3>
       <p>Click one of your pieces (not the king). Each time it captures, it secretly becomes the piece it captured, while keeping its current look.</p>
       <button class="btn primary big" data-act="confirm" ${G.shifter[c] == null ? 'disabled' : ''}>Confirm</button></div>`;
   }
   if (step === 'objective') {
     const o = E.objectiveById(G.objectives[c]);
-    return `<div class="card alert">${head}<h3>🎯 Your secret objective</h3>
+    return `<div class="card alert">${head}<h3>${I.objective} Your secret objective</h3>
       <div class="objective-card">${o.text}</div>
       <p>Complete it, or capture the enemy king, to win. Your opponent has a different objective you can't see.</p>
       <button class="btn primary big" data-act="confirm">Got it</button></div>`;
@@ -691,7 +692,7 @@ function drawOfferCard() {
 
 function predictCard() {
   const g = ui.predict.guess;
-  return `<div class="card alert"><h3>🔮 Predict their reply</h3>
+  return `<div class="card alert"><h3>${I.prophecy} Predict their reply</h3>
     <p>Your move is shown on the board. Click one of your opponent's pieces, then the square you think it will move to. If they play exactly that, you get a double move on your next turn.</p>
     ${g ? `<p>Your prophecy: <b>${E.sqName(g.from)} → ${E.sqName(g.to)}</b></p>` : ''}
     <div class="btn-row"><button class="btn primary" data-act="predict-ok" ${g ? '' : 'disabled'}>Lock in prophecy</button>
@@ -710,11 +711,11 @@ function playCard() {
       ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}</div>`;
   }
   let hint = G.check === c ? '<b class="check-txt">Check!</b> You must get your king out of check.' : 'Click or drag a piece to move. Checkmate the king to win.';
-  if (G.bonusNow === c) hint = '🔮 <b>Bonus move!</b> Your prophecy came true. Make your second move.';
-  else if (G.bonusPending === c) hint = `🔮 <b>Your prophecy came true!</b> You get two moves this turn, unless your first move gives check.${G.check === c ? ' <b class="check-txt">You are in check.</b>' : ''}`;
+  if (G.bonusNow === c) hint = `${I.prophecy} <b>Bonus move!</b> Your prophecy came true. Make your second move.`;
+  else if (G.bonusPending === c) hint = `${I.prophecy} <b>Your prophecy came true!</b> You get two moves this turn, unless your first move gives check.${G.check === c ? ' <b class="check-txt">You are in check.</b>' : ''}`;
   let actions = '';
   if (ui.tool === 'prophecy') {
-    hint = "🔮 Make your move as normal. Then you'll predict your opponent's reply.";
+    hint = `${I.prophecy} Make your move as normal. Then you'll predict your opponent's reply.`;
     actions = '<button class="btn" data-act="cancel">Cancel</button>';
   } else if (ui.tool === 'traitor') {
     hint = 'Your traitor is the highlighted enemy piece. Make one move with it.';
@@ -724,9 +725,9 @@ function playCard() {
     actions = '<button class="btn" data-act="cancel">Cancel</button>';
   } else {
     const btns = [];
-    if (traitorReady(c)) btns.push('<button class="btn" data-act="traitor">🗡 Use Traitor</button>');
-    if (E.canSwap(G, c)) btns.push('<button class="btn" data-act="swap">⇄ Secret Swap</button>');
-    if (E.prophecyReady(G, c) && G.bonusPending !== c && G.bonusNow !== c) btns.push('<button class="btn" data-act="prophecy">🔮 Use Prophecy</button>');
+    if (traitorReady(c)) btns.push(`<button class="btn" data-act="traitor">${I.traitor} Use Traitor</button>`);
+    if (E.canSwap(G, c)) btns.push(`<button class="btn" data-act="swap">${I.swap} Secret Swap</button>`);
+    if (E.prophecyReady(G, c) && G.bonusPending !== c && G.bonusNow !== c) btns.push(`<button class="btn" data-act="prophecy">${I.prophecy} Use Prophecy</button>`);
     if (btns.length) actions = `<div class="btn-row">${btns.join('')}</div>`;
   }
   return `<div class="card"><h3><span class="dotlive"></span>${ui.online || ui.bot ? 'Your move' : `${nm(c)} to move`}</h3><p>${hint}</p>${actions}
@@ -744,7 +745,7 @@ function overCard() {
     const items = secretItems(c);
     return items ? `<div class="section-label">${nm(c)}'s secrets</div><ul class="secret-list">${items}</ul>` : '';
   }).join('');
-  return `<div class="card"><h3>${r.winner ? `🏆 ${nm(r.winner)} won` : '½ Draw'}</h3><p>${resultText()}</p>
+  return `<div class="card"><h3>${r.winner ? `${I.trophy} ${nm(r.winner)} won` : '½ Draw'}</h3><p>${resultText()}</p>
     <div class="btn-row"><button class="btn primary" data-act="rematch">Rematch</button><button class="btn" data-act="new">New Game</button></div>
     ${ui.flash ? `<div class="flash">${ui.flash}</div>` : ''}
     ${reveal}</div>`;
@@ -752,19 +753,21 @@ function overCard() {
 
 function connectionCard() {
   if (!ui.online || !ui.net || ui.net.status === 'connected') return '';
-  return `<div class="card alert"><h3>⚠ Connection lost</h3><p>${nm(other(ui.viewer))} disconnected. You can start a new game.</p>
+  return `<div class="card alert"><h3>${I.warn} Connection lost</h3><p>${nm(other(ui.viewer))} disconnected. You can start a new game.</p>
     <button class="btn" data-act="new">New Game</button></div>`;
 }
 
 function moveText(e) {
-  return esc(e.text).replace(/^(🗡 )?([KQRBN])/, (_, tr, l) => `${tr || ''}${pieceSVG(l, 'w').replace('class="piece-svg"', 'class="piece-svg fig"')}`);
+  return iconize(esc(e.text).replace(/^(\[traitor\] )?([KQRBN])/, (_, tr, l) => `${tr || ''}${pieceSVG(l, 'w').replace('class="piece-svg"', 'class="piece-svg fig"')}`));
 }
+/** The engine writes [traitor], [boom] etc. in the move history; show them as icons. */
+const iconize = (text) => text.replace(/\[(traitor|boom|swap|prophecy)\]/g, (_, k) => I[k]);
 
 function movesHTML() {
   const h = G.history;
   if (!h.length) return '<div class="moves"><div class="moves-title">Moves</div><div class="empty">No moves yet.</div></div>';
   const cell = (e, idx) => (e
-    ? `<span class="m ${idx === h.length - 1 ? 'last' : ''} ${e.caught ? 'caught' : ''}"><span class="t">${moveText(e)}</span>${e.note ? `<span class="note">${e.note}</span>` : ''}</span>`
+    ? `<span class="m ${idx === h.length - 1 ? 'last' : ''} ${e.caught ? 'caught' : ''}"><span class="t">${moveText(e)}</span>${e.note ? `<span class="note">${iconize(esc(e.note))}</span>` : ''}</span>`
     : '<span></span>');
   const pairs = [];
   h.forEach((e, i) => {
@@ -793,11 +796,11 @@ function renderPanel() {
       <button class="btn primary big" data-act="new">Play</button></div>`;
   } else if (ui.phase === 'secret') {
     const items = secretItems(ui.viewer);
-    body = connectionCard() + setupCard() + (items ? `<div class="card"><h3>🔒 Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
+    body = connectionCard() + setupCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else if (ui.phase === 'play') {
     const showSecrets = ui.online || ui.bot || G.turn === ui.viewer;
     const items = showSecrets ? secretItems(ui.viewer) : '';
-    body = connectionCard() + drawOfferCard() + playCard() + (items ? `<div class="card"><h3>🔒 Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
+    body = connectionCard() + drawOfferCard() + playCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else {
     body = connectionCard() + overCard();
   }
@@ -806,15 +809,15 @@ function renderPanel() {
   panel.innerHTML = `
     <div class="tabs">
       <button class="tab active" data-act="noop"><span class="ti">${pieceSVG('P', 'w')}</span>Play</button>
-      <button class="tab" data-act="new"><span class="ti">＋</span>New Game</button>
-      <button class="tab" data-act="rules"><span class="ti">📖</span>Rules</button>
+      <button class="tab" data-act="new"><span class="ti">${I.plus}</span>New Game</button>
+      <button class="tab" data-act="rules"><span class="ti">${I.book}</span>Rules</button>
     </div>
     <div class="twist-row">${ui.phase === 'menu' ? '<span class="chip">Choose a mode in New Game</span>' : chips}</div>
     <div class="panel-body" id="panel-body">${body}</div>
     <div class="panel-foot">
-      <button class="icon-btn" data-act="resign" ${playing ? '' : 'disabled'} title="Resign"><span class="ib">⚑</span>Resign</button>
+      <button class="icon-btn" data-act="resign" ${playing ? '' : 'disabled'} title="Resign"><span class="ib">${I.flag}</span>Resign</button>
       <button class="icon-btn" data-act="draw" ${playing ? '' : 'disabled'} title="Offer a draw"><span class="ib">½</span>Draw</button>
-      <button class="icon-btn" data-act="flip" title="Flip board"><span class="ib">⇅</span>Flip</button>
+      <button class="icon-btn" data-act="flip" title="Flip board"><span class="ib">${I.flip}</span>Flip</button>
     </div>`;
   const pb = $('panel-body');
   if (ui.phase === 'play') pb.scrollTop = pb.scrollHeight;
@@ -1342,9 +1345,9 @@ function openNewGame() {
             <span class="check radio">${m.key === mode ? '●' : ''}</span>
           </button>`).join('')}</div>
         <div class="play-choices">
-          <button class="btn primary big" id="play-online">🌐 Play Online</button>
-          <button class="btn big secondary" id="play-bot">🤖 Play Bot</button>
-          <button class="btn big secondary" id="play-local">👥 Pass &amp; Play</button>
+          <button class="btn primary big" id="play-online">${I.globe} Play Online</button>
+          <button class="btn big secondary" id="play-bot">${I.robot} Play Bot</button>
+          <button class="btn big secondary" id="play-local">${I.people} Pass &amp; Play</button>
         </div>
         <div class="bot-pick hidden" id="bot-pick">
           <div class="section-label">Choose your opponent</div>
@@ -1429,7 +1432,7 @@ function renderLobby() {
     body = `
       <div class="section-label">Your name</div>
       <div class="names one"><input id="my-name" maxlength="16" value="${esc(ui.myName)}" placeholder="Your name" aria-label="Your name"></div>
-      <div class="card quick-card"><div><h3>⚡ Play a random opponent</h3><p>Get matched with anyone else looking for a <b>${mode.icon} ${mode.name}</b> game.</p></div>
+      <div class="card quick-card"><div><h3>${I.bolt} Play a random opponent</h3><p>Get matched with anyone else looking for a <b>${mode.icon} ${mode.name}</b> game.</p></div>
         <button class="btn primary" data-lobby="quick">Find Opponent</button></div>
       <div class="online-grid">
         <div class="card"><h3>Create a game</h3><p>Get a code to send to a friend. Mode: <b>${mode.icon} ${mode.name}</b>.</p>
@@ -1443,7 +1446,7 @@ function renderLobby() {
       <p class="lobby-help">Online games connect your browser directly to your friend's. Both of you need an internet connection.</p>`;
   }
   modal.innerHTML = `<div class="modal" role="dialog" aria-label="Play online">
-    <div class="modal-head"><h2>🌐 Play Online</h2><button class="btn ghost small" data-close>✕</button></div>
+    <div class="modal-head"><h2>${I.globe} Play Online</h2><button class="btn ghost small" data-close>✕</button></div>
     <div class="modal-body">${body}</div></div>`;
   const saveName = () => {
     const el = $('my-name');
@@ -1481,7 +1484,7 @@ function renderLobby() {
 function openRules() {
   ui.lobbyOpen = false;
   modal.innerHTML = `<div class="modal" role="dialog" aria-label="Rules">
-    <div class="modal-head"><h2>📖 Rules</h2><button class="btn ghost small" data-close>✕</button></div>
+    <div class="modal-head"><h2>${I.book} Rules</h2><button class="btn ghost small" data-close>✕</button></div>
     <div class="modal-body">
       <h4>Base game</h4>
       <p>Full standard chess rules, the same as chess.com: <b>checkmate wins</b>. You can never make a move that
@@ -1515,6 +1518,9 @@ function openRules() {
 // ---------------------------------------------------------------- sidebar
 $('logo-mark').innerHTML = pieceSVG('N', 'w').replace(/#ffffff/g, '#81b64c').replace(/#302e2c/g, '#1e2a14');
 $('nav-ic-play').innerHTML = pieceSVG('P', 'w');
+$('nav-ic-new').innerHTML = I.plus;
+$('nav-ic-online').innerHTML = I.globe;
+$('nav-ic-rules').innerHTML = I.book;
 document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => {
   const n = b.dataset.nav;
   if (n === 'new') openNewGame();
@@ -1522,7 +1528,7 @@ document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click
   if (n === 'rules') openRules();
 }));
 function renderSound() {
-  $('sound-ic').textContent = ui.sound ? '🔊' : '🔇';
+  $('sound-ic').innerHTML = ui.sound ? I.soundOn : I.soundOff;
   $('sound-label').textContent = ui.sound ? 'Sound on' : 'Sound off';
 }
 $('sound-toggle').addEventListener('click', () => { ui.sound = !ui.sound; store.set('sound', ui.sound); renderSound(); if (ui.sound) sound('move'); });

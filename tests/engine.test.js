@@ -216,7 +216,7 @@ test('secret swap exchanges identities but not looks', () => {
   eq(a.type, 'B'); eq(a.shown, 'N');
   eq(b.type, 'N'); eq(b.shown, 'B');
   ok(s.swapUsed.w);
-  eq(s.history[0].text, '⇄ secret swap');
+  eq(s.history[0].text, '[swap] secret swap');
   ok(throws(() => E.doSwap(s, S('e1'), S('d8'))));
 });
 
@@ -247,7 +247,7 @@ test('a mine destroys an enemy piece that lands on it', () => {
   E.setMines(s, 'w', [S('c6'), S('h5')]);
   mv(s, 'b8', 'c6');
   eq(s.board[S('c6')], null);
-  eq(s.history[0].text, 'Nc6 💥');
+  eq(s.history[0].text, 'Nc6 [boom]');
   eq(s.captured.w[0].by, 'mine');
   eq(s.mines.w.join(), String(S('h5')), 'used mine is gone');
 });

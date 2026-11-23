@@ -427,9 +427,9 @@ function applyMove(s, m, ctrl, promo) {
   else text = `${seen}${victim ? 'x' : ''}${sqName(m.to)}`;
   if (promoted && p.shown === p.type) text += '=' + p.type;
   if (revealed) text += ' (revealed)';
-  if (boom === 'exploded') text += ' 💥';
+  if (boom === 'exploded') text += ' [boom]';
   if (boom === 'fizzled') text += ' (mine fizzled)';
-  if (m.traitor) text = '🗡 ' + text;
+  if (m.traitor) text = '[traitor] ' + text;
   s.lastMove = { from: m.from, to: m.to };
   return { text, boom };
 }
@@ -497,20 +497,20 @@ function makeMove(s, move) {
     const hit = pr.from === legal.from && pr.to === legal.to;
     pr.state = hit ? 'hit' : 'miss';
     if (hit) s.bonusPending = foe;
-    prophecyNote = hit ? `🔮 ${foe === W ? 'White' : 'Black'} predicted this move: bonus move next turn` : '🔮 a prophecy missed';
+    prophecyNote = hit ? `[prophecy] ${foe === W ? 'White' : 'Black'} predicted this move: bonus move next turn` : '[prophecy] a prophecy missed';
   }
 
   const { text } = applyMove(s, legal, me, move.promo);
   if (legal.traitor) s.traitor[me].used = true;
   const entry = { color: me, text };
-  if (isBonus) addNote(entry, '🔮 bonus move');
+  if (isBonus) addNote(entry, '[prophecy] bonus move');
   if (prophecyNote) addNote(entry, prophecyNote);
   s.history.push(entry);
 
   // Keep the turn for the bonus move, unless this move gave check (or there's nothing left to play).
   let keep = takeBonus && !inCheck(s.board, foe);
   if (keep && !hasAnyMove(s, me)) keep = false;
-  if (takeBonus && !keep) addNote(entry, '🔮 bonus move forfeited');
+  if (takeBonus && !keep) addNote(entry, '[prophecy] bonus move forfeited');
   s.turn = keep ? me : foe;
   if (keep) s.bonusNow = me;
   else s.turns[me]++; // a whole turn is over (a bonus double move counts as one turn)
@@ -544,7 +544,7 @@ function doSwap(s, a, b) {
   s.ep = null;
   s.halfmove++;
   s.lastMove = null;
-  const entry = { color: me, text: '⇄ secret swap' };
+  const entry = { color: me, text: '[swap] secret swap' };
   s.history.push(entry);
   s.turn = other(me);
   s.ply++;

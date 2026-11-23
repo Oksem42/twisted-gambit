@@ -379,3 +379,27 @@ a { color: inherit; }
 /* premoves */
 .sq.pre.light { background: #e8877c; }
 .sq.pre.dark { background: #cf5f52; }
+
+
+/* line icons */
+.gi { width: 1.15em; height: 1.15em; display: inline-block; vertical-align: -.2em; flex-shrink: 0; }
+.si-ic .gi { width: 18px; height: 18px; }
+.si-ic.snd .gi { width: 22px; height: 22px; }
+.tab .ti .gi { width: 22px; height: 22px; }
+.twist-opt .ti .gi { width: 26px; height: 26px; }
+.bot-av .gi { width: 28px; height: 28px; }
+.secret-list .ic .gi { width: 17px; height: 17px; }
+.icon-btn .ib .gi { width: 18px; height: 18px; display: block; }
+.clock .ci .gi { width: 17px; height: 17px; display: block; }
+.btn .gi { margin-right: 2px; }
+.badge .gi { width: 100%; height: 100%; color: #fff; stroke-width: 2.6; }
+.mine { width: 30%; height: 30%; display: grid; place-items: center; padding: 2%; border-radius: 50%; background: #1f1e1be0; color: #fff; }
+.mine .gi { width: 100%; height: 100%; stroke-width: 2.4; }
+.boom { color: #d3261e; }
+.boom .gi { width: 82%; height: 82%; }
+.boom .gi path { fill: #f7c631; }
+.chip .gi { width: 12px; height: 12px; vertical-align: -2px; }
+.move-row .gi { width: 14px; height: 14px; vertical-align: -2px; }
+.move-row .note .gi { width: 12px; height: 12px; }
+.card h3 .gi { width: 19px; height: 19px; }
+.modal-head h2 .gi { width: 24px; height: 24px; }
