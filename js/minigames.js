@@ -158,7 +158,8 @@ function start(el, opts) {
       <div class="mg-title">${opts.title || K.title}</div><div class="mg-help">${K.help}</div>
       ${opts.kind === 'tug' ? '<canvas class="mg-rope" width="600" height="120"></canvas>' : ''}
       <div class="mg-arenas">${players.map(arena).join('')}</div>
-      <div class="mg-status">Get ready…</div></div>`;
+      <div class="mg-status">Get ready…</div>
+      <button type="button" class="btn small mg-leave">Leave minigame</button></div>`;
   el.classList.remove('hidden');
   const status = el.querySelector('.mg-status');
   const cv = (c) => el.querySelector(`[data-cv="${c}"]`);
@@ -238,7 +239,7 @@ function start(el, opts) {
       else {
         const ticks = Math.floor(elapsed / K.tickMs), finalTicks = opts.kind === 'snake' ? Math.floor(s.final / 100) : s.final;
         s.score = opts.kind === 'snake' ? Math.min(ticks, finalTicks) * 100 : Math.min(ticks, finalTicks);
-        if (ticks >= finalTicks) { s.done = true; s.score = s.final; }
+        if (ticks >= finalTicks) { s.done = true; s.score = s.final; opts.onDone(p.color, s.final); } // the bot is out: report it now
       }
     }
     if (running) status.textContent = opts.kind === 'tug' ? `${Math.max(0, (5 - elapsed / 1000)).toFixed(1)}s` : 'Go!';
@@ -270,6 +271,7 @@ function start(el, opts) {
   const kd = (e) => onKey(e, true), ku = (e) => onKey(e, false);
   window.addEventListener('keydown', kd, true);
   window.addEventListener('keyup', ku, true);
+  el.querySelector('.mg-leave').addEventListener('click', () => { if (opts.onLeave) opts.onLeave(); });
   el.querySelectorAll('[data-tap]').forEach((b) => b.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     const c = b.dataset.tap;

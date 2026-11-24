@@ -36,11 +36,11 @@ No install, no build step: **double-click `index.html`** and it opens in your br
 
 - **Pass & Play:** two players on one device. A privacy screen hides the board between turns.
 - **Premoves:** in online and bot games, move during your opponent's turn to queue moves (shown in red). Right-click to cancel.
-- **Play Bot:** play a computer opponent in any mode (you play White):
+- **Play Bot:** play a computer opponent in any mode (you get White or Black at random):
   - **Bot v1**, a friendly sparring partner.
   - **Jules**, a real chess engine: alpha-beta search with iterative deepening, quiescence search, a transposition table and move-ordering heuristics, thinking up to about 2.5 seconds a move. It plays every mode deliberately (mines on your knights' squares, your queen as its traitor, a pawn shapeshifter, searched traitor moves and swaps, prophecies from its own analysis, steering toward its hidden objective). It plays fair: it only knows what Black can see.
 - **Play Online:** click *Play Online → Create Game*, then *Copy invite link* and send it to a friend.
-  Clicking the link joins your game instantly (or they can type the 5-letter code under *Join a game*). The creator plays White.
+  Clicking the link joins your game instantly (or they can type the 5-letter code under *Join a game*). Colours are picked at random.
 - **Find Opponent:** *Play Online → Find Opponent* matches you with any other player searching for the same mode.
   Both players need the game (the files, or a hosted copy) and an internet connection.
 

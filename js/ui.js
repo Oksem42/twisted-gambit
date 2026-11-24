@@ -319,15 +319,17 @@ function onNet(m) {
     if (n.role === 'host') startOnlineGame(n.mode);
     return refresh();
   }
-  if (m.t === 'start' && n.role === 'guest') return beginOnline(m.mode, m.G, m.names);
+  if (m.t === 'start' && n.role === 'guest') { n.myColor = m.hostColor ? other(m.hostColor) : B; return beginOnline(m.mode, m.G, m.names); }
   if (m.t === 'act') applyRemote(m.a);
 }
 
 function startOnlineGame(mode) {
   const n = ui.net;
   const g = E.newGame({ [mode]: true });
-  const names = { w: ui.myName || 'Host', b: n.oppName || 'Guest' };
-  send({ t: 'start', mode, G: g, names });
+  g.gid = makeCode() + makeCode(); // tells this game's messages apart from the last one's
+  n.myColor = Math.random() < 0.5 ? W : B; // colours are random
+  const names = { [n.myColor]: ui.myName || 'Host', [other(n.myColor)]: n.oppName || 'Guest' };
+  send({ t: 'start', mode, G: g, names, hostColor: n.myColor });
   beginOnline(mode, g, names);
 }
 
@@ -339,6 +341,7 @@ function beginOnline(mode, g, names) {
   ui.lobbyOpen = false;
   closeModal();
   cancelSpin();
+  resetTransient();
   overlay.classList.add('hidden');
   ui.gameMode = mode;
   ui.names = names;
@@ -356,9 +359,13 @@ function beginOnline(mode, g, names) {
 function markReady() {
   ui.setupQueue = [];
   ui.ready[me()] = true;
-  sendAct({ kind: 'ready', color: me() });
+  sendAct({ kind: 'ready', color: me(), gid: G.gid });
   checkReady();
 }
+// If a "ready" message gets lost, both players would wait forever: keep repeating it until the game starts.
+setInterval(() => {
+  if (ui.online && ui.phase === 'secret' && ui.ready[me()] && !ui.ready[other(me())]) sendAct({ kind: 'ready', color: me(), gid: G.gid });
+}, 2000);
 function checkReady() {
   if (ui.phase === 'secret' && ui.ready.w && ui.ready.b) {
     ui.phase = 'play';
@@ -376,7 +383,9 @@ function applyRemote(a) {
       case 'setTraitor': E.setTraitor(G, a.color, a.sq); break;
       case 'setMines': E.setMines(G, a.color, a.squares); break;
       case 'setShifter': E.setShifter(G, a.color, a.sq); break;
-      case 'ready': ui.ready[a.color] = true; return checkReady();
+      case 'ready':
+        if (a.gid && G.gid && a.gid !== G.gid) return; // from the previous game
+        ui.ready[a.color] = true; return checkReady();
       case 'move': {
         if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
         const go = () => {
@@ -385,6 +394,7 @@ function applyRemote(a) {
           sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
           ui.fresh = null;
           ui.anim = slidesFor(a.move);
+          moveFx(a.move, false);
           afterAction();
         };
         const spin = G.twists.gambler ? E.previewSpin(G, a.move) : null;
@@ -392,12 +402,15 @@ function applyRemote(a) {
       }
       case 'power':
         if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
-        E.usePower(G, a.slot, a.args); return afterPower();
-      case 'freePush': E.freePush(G, a.from, a.to); ui.anim = [{ from: a.from, to: a.to }]; sound('move'); break;
-      case 'mgScore':
-        if (ui.mg) { ui.mg.scores[a.color] = a.score; ui.mg.handle.remote(a.color, a.score, true); finishMinigameUI(); }
+        return afterPower(runPower(a.slot, a.args));
+      case 'freePush': E.freePush(G, a.from, a.to); stageFx({ kind: 'piston', args: { from: a.from, to: a.to } }, [{ from: a.from, to: a.to }], []); sound('move'); break;
+      case 'mgLeave':
+        if (ui.mg) forceMinigame(a.color);
         return;
-      case 'mgProg': if (ui.mg) ui.mg.handle.remote(a.color, a.score, false); return;
+      case 'mgScore':
+        if (ui.mg && !ui.mg.closing) { ui.mg.scores[a.color] = a.score; ui.mg.handle.remote(a.color, a.score, true); finishMinigameUI(); }
+        return;
+      case 'mgProg': if (ui.mg && !ui.mg.closing) ui.mg.handle.remote(a.color, a.score, false); return;
       case 'buy':
         if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
         E.buyPiece(G, a.piece, a.sq); sound('reveal'); ui.fresh = a.sq; return afterAction();
@@ -602,18 +615,26 @@ function runSlides() {
   const list = ui.anim;
   ui.anim = null;
   if (!list || reduceMotion()) return;
-  for (const { from, to } of list) {
+  for (const x of list) {
+    const { from, to } = x;
     const fromEl = boardEl.querySelector(`[data-sq="${from}"]`);
     const toEl = boardEl.querySelector(`[data-sq="${to}"]`);
     const pc = toEl && toEl.querySelector('.pc');
     if (!fromEl || !pc || !pc.animate) continue; // e.g. the piece was blown up by a mine
     const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+    const dx = a.left - b.left, dy = a.top - b.top, at = (k, extra = '') => ({ transform: `translate(${dx * k}px, ${dy * k}px) ${extra}` });
+    const viaEl = x.via != null && boardEl.querySelector(`[data-sq="${x.via}"]`), v = viaEl && viaEl.getBoundingClientRect();
+    const vx = v ? v.left - b.left : 0, vy = v ? v.top - b.top : 0;
+    const frames = {
+      suck: [at(1), at(0.86, 'scale(.82)'), at(0, 'scale(1.08)'), at(0)], // creeps, then gets sucked in
+      spin: [at(1, 'rotate(0deg)'), at(0.5, 'rotate(200deg) scale(.9)'), at(0, 'rotate(360deg)')],
+      bounce: [at(1), at(0.1, 'translateY(-10px)'), at(0)],
+      slip: [at(1), { transform: `translate(${vx}px, ${vy}px) rotate(-8deg)`, offset: 0.3 }, at(0, 'rotate(0)')],
+      warp: [at(1), { transform: `translate(${vx}px, ${vy}px)`, opacity: 1, offset: 0.3 }, { transform: `translate(${vx}px, ${vy}px) scale(.2) rotate(180deg)`, opacity: 0, offset: 0.5 }, { transform: 'scale(.2)', opacity: 0, offset: 0.6 }, { transform: 'scale(1)', opacity: 1 }],
+    }[x.style] || [at(1), at(0)];
     pc.classList.remove('fresh');
     pc.style.zIndex = '20';
-    const anim = pc.animate(
-      [{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: 'translate(0, 0)' }],
-      { duration: 170, easing: 'cubic-bezier(.25,.75,.4,1)' },
-    );
+    const anim = pc.animate(frames, { duration: x.dur || 170, delay: x.delay || 0, fill: 'backwards', easing: x.ease || 'cubic-bezier(.25,.75,.4,1)' });
     anim.onfinish = anim.oncancel = () => { pc.style.zIndex = ''; };
   }
 }
@@ -622,6 +643,7 @@ function render() {
   const bottom = ui.flipped ? other(ui.viewer) : ui.viewer;
   renderBoard();
   runSlides();
+  runFx();
   renderBar($('bar-bottom'), bottom);
   renderBar($('bar-top'), other(bottom));
   renderPanel();
@@ -630,6 +652,146 @@ function render() {
   updateClocks();
 }
 function refresh() { if (ui.lobbyOpen) renderLobby(); else render(); }
+
+// ---------------------------------------------------------------- power effects
+// Pieces a power moved glide to their new squares; new pieces pop in; each power adds its own little show.
+function boardDiff(before, after) {
+  const pos = new Map();
+  before.forEach((p, i) => { if (p) pos.set(p.id, i); });
+  const slides = [], born = [];
+  after.forEach((p, i) => {
+    if (!p) return;
+    const j = pos.get(p.id);
+    if (j == null) born.push(i);
+    else if (j !== i) slides.push({ from: j, to: i, dur: 420 });
+  });
+  return { slides, born };
+}
+/** After a move: a banana slip or a portal warp gets its own effect (and a slide, even for a dragged piece). */
+function moveFx(m, dropped) {
+  const last = G.history[G.history.length - 1], note = (last && last.note) || '';
+  if (!G.lastMove || G.lastMove.to === m.to) return;
+  const warp = note.includes('[portals]'), slip = note.includes('[banana]');
+  ui.anim = [{ from: dropped ? m.to : m.from, via: m.to, to: G.lastMove.to, dur: warp ? 1300 : 1100, style: warp ? 'warp' : 'slip', ease: 'ease-out' }];
+  ui.fx = slip ? { kind: 'slip', at: m.to } : { kind: 'warp', a: m.to, b: G.lastMove.to };
+  ui.fxUntil = performance.now() + 1400;
+}
+// [build-up before anything moves, travel time, easing, travel style]
+const FX_TIME = {
+  piston: [700, 320, 'cubic-bezier(.2,.9,.3,1)'],
+  magnet: [1100, 800, 'cubic-bezier(.6,0,1,.4)', 'suck'],
+  tornado: [800, 950, 'ease-in-out', 'spin'],
+  bowling: [350, 300, 'ease-out'],
+  blower: [750, 700, 'cubic-bezier(.5,0,.9,.6)'],
+  quake: [650, 520, 'ease-out', 'bounce'],
+  wall: [650, 0], portals: [750, 0], banana: [0, 0],
+  rewind: [800, 750, 'ease-in-out'],
+  prize: [300, 450],
+};
+/** Plan a power's show: the effect builds up first, then the pieces move, then new pieces pop in. */
+function stageFx(fx, slides, born) {
+  const [build, travel, ease, style] = FX_TIME[fx.kind] || [0, 420];
+  for (const s of slides) Object.assign(s, { delay: build, dur: travel || 420, ease, style });
+  let end = build + (slides.length ? travel || 420 : 0) + (born.length ? 500 : 0);
+  if (fx.kind === 'bowling') { // each piece is knocked aside when the ball reaches it
+    const startRank = fx.by === W ? 0 : 7;
+    for (const s of slides) s.delay = build + 1300 * Math.abs(E.rankOf(s.from) - startRank) / 7;
+    end = build + 1300 + travel;
+  }
+  ui.anim = slides;
+  ui.fx = { ...fx, born, build };
+  ui.fxUntil = performance.now() + end + 200;
+}
+const fxWait = () => Math.max(0, (ui.fxUntil || 0) - performance.now());
+const boardWrap = $('board-wrap');
+function sqBox(i) {
+  const el = boardEl.querySelector(`[data-sq="${i}"]`);
+  if (!el) return null;
+  const a = el.getBoundingClientRect(), w = boardWrap.getBoundingClientRect();
+  return { x: a.left - w.left, y: a.top - w.top, s: a.width };
+}
+function fxBox(cls, squares, html = '', ms = 1200, vars = {}) {
+  const boxes = squares.map(sqBox).filter(Boolean);
+  if (!boxes.length) return null;
+  const x0 = Math.min(...boxes.map((b) => b.x)), y0 = Math.min(...boxes.map((b) => b.y));
+  const x1 = Math.max(...boxes.map((b) => b.x + b.s)), y1 = Math.max(...boxes.map((b) => b.y + b.s));
+  const d = document.createElement('div');
+  d.className = `fx ${cls}`;
+  Object.assign(d.style, { left: `${x0}px`, top: `${y0}px`, width: `${x1 - x0}px`, height: `${y1 - y0}px` });
+  for (const [k, v] of Object.entries(vars)) d.style.setProperty(k, v);
+  d.innerHTML = html;
+  $('fx').appendChild(d);
+  setTimeout(() => d.remove(), ms);
+  return d;
+}
+const rowOf = (r) => Array.from({ length: 8 }, (_, f) => E.sq(f, r));
+const fileOfSq = (f) => Array.from({ length: 8 }, (_, r) => E.sq(f, r));
+function shake(cls, ms) { boardWrap.classList.remove(cls); void boardWrap.offsetWidth; boardWrap.classList.add(cls); setTimeout(() => boardWrap.classList.remove(cls), ms); }
+function runFx() {
+  const fx = ui.fx;
+  ui.fx = null;
+  if (!fx || reduceMotion()) return;
+  for (const i of fx.born || []) {
+    const el = boardEl.querySelector(`[data-sq="${i}"] .pc, [data-sq="${i}"] .wall-tile`);
+    if (el) { el.style.animationDelay = `${fx.build || 0}ms`; el.classList.add('pop'); }
+  }
+  const a = fx.args || {};
+  switch (fx.kind) {
+    case 'piston': {
+      const s = sqBox(a.from), t = sqBox(a.to);
+      if (!s || !t) break;
+      const ang = Math.atan2(t.y - s.y, t.x - s.x) * 180 / Math.PI;
+      fxBox('fx-piston', [a.from], `<span style="transform:rotate(${ang}deg)">${I.pw_piston}</span>`, 1300, { '--dx': `${(t.x - s.x) * 0.5}px`, '--dy': `${(t.y - s.y) * 0.5}px` });
+      break;
+    }
+    case 'magnet':
+      fxBox('fx-magnet', [a.at], `${I.pw_magnet}<i></i><i></i><i></i><i></i>`, 2100);
+      break;
+    case 'tornado': {
+      const f = E.fileOf(a.at), r = E.rankOf(a.at), area = [];
+      for (let df = -1; df <= 1; df++) for (let dr = -1; dr <= 1; dr++) area.push(E.sq(f + df, r + dr));
+      fxBox('fx-tornado', area, `<span>${I.pw_tornado}</span>`, 1900);
+      break;
+    }
+    case 'bowling': {
+      const start = E.sq(a.file, fx.by === W ? 0 : 7), end = E.sq(a.file, fx.by === W ? 7 : 0);
+      const s = sqBox(start), t = sqBox(end);
+      if (s && t) fxBox('fx-ball', [start], '<b></b>', 1800, { '--dx': `${t.x - s.x}px`, '--dy': `${t.y - s.y}px` });
+      break;
+    }
+    case 'blower': {
+      const e = other(fx.by), here = sqBox(E.sq(0, a.rank)), back = sqBox(E.sq(0, Math.max(0, Math.min(7, a.rank - (e === W ? 1 : -1)))));
+      const dy = here && back ? Math.sign(back.y - here.y) || 1 : 1;
+      const streaks = Array.from({ length: 9 }, (_, k) => `<i style="left:${4 + k * 11.5}%;animation-delay:${(k % 3) * 0.12}s"></i>`).join('');
+      fxBox('fx-wind', rowOf(a.rank), `${streaks}<span>${I.pw_blower}</span>`, 1700, { '--dir': dy });
+      break;
+    }
+    case 'quake':
+      shake('quaking', 1200);
+      fxBox('fx-quake-row', rowOf(a.rank), '', 1300);
+      break;
+    case 'wall':
+      fxBox('fx-dust', [a.a], '', 1300); fxBox('fx-dust', [a.b], '', 1300);
+      break;
+    case 'banana':
+      if (fx.by === ui.viewer || isOmni()) fxBox('fx-drop', [a.at], I.pw_banana, 1000); // only the owner sees where it went
+      break;
+    case 'portals':
+      fxBox('fx-portal-pop', [a.a], '', 1300); fxBox('fx-portal-pop', [a.b], '', 1300);
+      break;
+    case 'rewind':
+      shake('rewinding', 1600);
+      fxBox('fx-rewind', [E.sq(3, 3), E.sq(4, 4)], I.pw_rewind, 1600);
+      break;
+    case 'slip':
+      fxBox('fx-slip', [fx.at], I.pw_banana, 1200);
+      break;
+    case 'warp':
+      fxBox('fx-warp', [fx.a], '', 1000);
+      fxBox('fx-warp late', [fx.b], '', 1500);
+      break;
+  }
+}
 
 // ---------------------------------------------------------------- panel
 function traitorDesc(c) {
@@ -789,14 +951,22 @@ function powerClick(i) {
 function doPower(slot, args) {
   tick();
   const t = Math.round(ui.clock[ui.viewer]);
-  try { E.usePower(G, slot, args); } catch (e) { ui.flash = e.message; ui.tool = null; ui.power = null; return render(); }
+  let fx;
+  try { fx = runPower(slot, args); } catch (e) { ui.flash = e.message; ui.tool = null; ui.power = null; return render(); }
   sendAct({ kind: 'power', slot, args, t });
-  afterPower();
+  afterPower(fx);
 }
-function afterPower() {
-  sound('reveal');
+/** Use a power, remembering what the board looked like so the change can be animated. */
+function runPower(slot, args) {
+  const by = G.turn, kind = G.powers[by][slot].id, before = G.board.slice();
+  E.usePower(G, slot, args);
+  return { kind, args, by, before };
+}
+function afterPower(fx) {
+  sound(fx && fx.kind === 'quake' ? 'boom' : 'reveal');
   ui.tool = null; ui.power = null; ui.fresh = null; ui.anim = null; ui.flash = '';
   if (G.minigame) return startMinigameUI();
+  if (fx) { const d = boardDiff(fx.before, G.board); stageFx(fx, d.slides, d.born); }
   afterAction();
 }
 function doFreePush(args) {
@@ -804,7 +974,7 @@ function doFreePush(args) {
   sendAct({ kind: 'freePush', from: args.from, to: args.to });
   sound('move');
   ui.tool = null; ui.power = null; ui.selected = null; ui.moves = [];
-  ui.anim = [{ from: args.from, to: args.to }];
+  stageFx({ kind: 'piston', args }, [{ from: args.from, to: args.to }], []);
   render();
 }
 
@@ -830,22 +1000,40 @@ function startMinigameUI() {
       finishMinigameUI();
     },
     onProgress: ui.online ? (c, score) => sendAct({ kind: 'mgProg', color: c, score }) : null,
+    onLeave: () => {
+      if (ui.mg !== state || state.closing) return;
+      if (ui.online) sendAct({ kind: 'mgLeave', color: ui.viewer });
+      forceMinigame(ui.bot || ui.online ? ui.viewer : null);
+    },
   });
 }
-function finishMinigameUI() {
+/** Someone left the minigame: they lose it. With two players on one device, nobody gets the prize. */
+function forceMinigame(leaver) {
+  const state = ui.mg;
+  if (!state) return;
+  if (state.closing && state.left && leaver && state.left !== leaver) { state.scores = { w: 0, b: 0 }; return; } // both left at once: a tie
+  state.left = leaver || 'both';
+  state.scores = leaver ? { [leaver]: 0, [other(leaver)]: 1 } : { w: 0, b: 0 };
+  state.closing = false;
+  finishMinigameUI(leaver ? `${nm(leaver)} left the minigame.` : 'Minigame left: no prize.');
+}
+function finishMinigameUI(note) {
   const state = ui.mg;
   if (!state || state.scores.w == null || state.scores.b == null || state.closing) return;
   state.closing = true;
   const s = state.scores, winner = s.w === s.b ? null : s.w > s.b ? W : B;
-  state.handle.result(winner ? `${nm(winner)} wins ${PRIZE_NAME[G.minigame ? G.minigame.id : 'snake']}!` : "It's a tie: no prize.");
+  const prize = winner ? `${nm(winner)} wins ${PRIZE_NAME[G.minigame ? G.minigame.id : 'snake']}!` : "It's a tie: no prize.";
+  state.handle.result(note ? `${note} ${prize}` : prize);
   sound(winner ? 'end' : 'move');
   setTimeout(() => {
     if (ui.mg !== state) return;
     state.handle.stop();
     ui.mg = null;
     if (G !== state.game || !G.minigame) return render();
-    try { E.finishMinigame(G, s); } catch (e) { ui.flash = e.message; }
-    ui.anim = null;
+    const before = G.board.slice();
+    try { E.finishMinigame(G, state.scores); } catch (e) { ui.flash = e.message; }
+    const d = boardDiff(before, G.board);
+    stageFx({ kind: 'prize' }, d.slides, d.born);
     afterAction();
   }, 1800);
 }
@@ -1087,6 +1275,7 @@ function runSetup() {
 function startLocalGame(mode) {
   netTeardown();
   cancelSpin();
+  resetTransient();
   ui.bot = null;
   ui.gameMode = mode;
   store.set('mode', mode);
@@ -1108,14 +1297,16 @@ function startBotGame(mode, id = 'v1') {
   store.set('mode', mode);
   G = E.newGame({ [mode]: true });
   if (!BOTS[id]) id = 'v1';
-  ui.bot = { color: B, id };
-  ui.viewer = W;
-  ui.names = { w: ui.myName || ui.localNames.w || 'You', b: BOTS[id].name };
+  const botColor = Math.random() < 0.5 ? W : B; // you get White or Black at random
+  ui.bot = { color: botColor, id };
+  ui.viewer = other(botColor);
+  ui.names = { [ui.viewer]: ui.myName || ui.localNames.w || 'You', [botColor]: BOTS[id].name };
+  resetTransient();
   ui.clock = { w: 0, b: 0, running: null, since: 0 };
   Object.assign(ui, { selected: null, moves: [], tool: null, swapFirst: null, fresh: null, flash: '', flipped: false, showResult: false, drawOffered: false, premoves: [], preSel: false });
   BOTS[id].engine.setup(G, ui.bot.color);
   const steps = setupSteps();
-  ui.setupQueue = steps.length ? [{ color: W, steps: [...steps], started: true }] : [];
+  ui.setupQueue = steps.length ? [{ color: ui.viewer, steps: [...steps], started: true }] : [];
   closeModal();
   overlay.classList.add('hidden');
   runSetup();
@@ -1146,8 +1337,9 @@ function botPlay(game, action) {
   action = action || Bot.chooseAction(G);
   if (!action) return;
   if (action.type === 'power') {
-    try { E.usePower(G, action.slot, action.args); } catch { return; }
-    return afterPower();
+    let fx;
+    try { fx = runPower(action.slot, action.args); } catch { return; }
+    return afterPower(fx);
   }
   const move = action.type === 'move' && G.twists.gambler ? { ...action.move, roll: Math.random() } : action.move;
   const go = () => {
@@ -1159,6 +1351,7 @@ function botPlay(game, action) {
         E.makeMove(G, move);
         sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
         ui.anim = slidesFor(move);
+        moveFx(move, false);
       }
     } catch { return; }
     ui.fresh = action.type === 'buy' ? action.sq : null;
@@ -1175,16 +1368,16 @@ function botTurn() {
   if (G.twists.powers && E.freePushOptions(G, ui.bot.color).length) { // the Tug of War prize comes first
     const opts = E.freePushOptions(G, ui.bot.color);
     const o = ui.bot.id === 'jules' ? Jules.pickPush(G) : opts[Math.floor(Math.random() * opts.length)].args;
-    try { E.freePush(G, o.from, o.to); ui.anim = [{ from: o.from, to: o.to }]; sound('move'); render(); } catch { /* skip the push */ }
+    try { E.freePush(G, o.from, o.to); stageFx({ kind: 'piston', args: o }, [{ from: o.from, to: o.to }], []); sound('move'); render(); } catch { /* skip the push */ }
   }
   if (ui.bot.id === 'jules') {
     botTimer = setTimeout(() => {
       if (G !== game || !ui.bot || G.turn !== ui.bot.color) return;
       const thinkMs = Math.max(300, Math.min(2500, timeLeft(ui.bot.color) / 25));
       julesThink(G, thinkMs).then((action) => botPlay(game, action));
-    }, 80);
+    }, 80 + fxWait());
   } else {
-    botTimer = setTimeout(() => botPlay(game, Bot.chooseAction(game)), 450 + Math.random() * 800);
+    botTimer = setTimeout(() => botPlay(game, Bot.chooseAction(game)), 450 + Math.random() * 800 + fxWait());
   }
 }
 
@@ -1208,7 +1401,16 @@ function afterAction() {
   if (ui.online || G.turn === ui.viewer) { startClock(G.turn); render(); return runPremove(); } // online, or a bonus move
   stopClock();
   render();
-  setTimeout(() => handoff(G.turn), ui.privacy ? 650 : 250);
+  const game = G;
+  handoffTimer = setTimeout(() => { if (G === game && ui.phase === 'play' && !ui.bot && !ui.online) handoff(G.turn); }, (ui.privacy ? 650 : 250) + fxWait());
+}
+let handoffTimer = null;
+/** Clear everything a previous game might have left running, so a new game always starts playable. */
+function resetTransient() {
+  clearTimeout(handoffTimer); clearTimeout(botTimer); clearTimeout(preTimer);
+  ui.predict = null; ui.promo = null; ui.power = null; ui.buyType = null; ui.fx = null; ui.anim = null;
+  drag = null;
+  const fxl = $('fx'); if (fxl) fxl.innerHTML = '';
 }
 
 function gameOver() {
@@ -1263,6 +1465,7 @@ function commitMove(m, dropped, act) {
   sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
   ui.fresh = dropped ? m.to : null;
   ui.anim = dropped ? null : slidesFor(m);
+  moveFx(m, dropped);
   ui.flash = '';
   afterAction();
 }
@@ -1402,7 +1605,7 @@ function runPremove() {
     if (!legal) return clearPremoves('Premove wasn\'t legal, so it was cancelled.');
     ui.premoves.shift();
     doMove({ ...legal, promo: legal.promo ? 'Q' : undefined }, true); // already drawn in place
-  }, 110);
+  }, 110 + fxWait());
 }
 function onPremoveDown(i, e) {
   const b = preBoard(), p = b[i];
@@ -1721,7 +1924,7 @@ function renderLobby() {
         ${navigator.share ? `<button class="btn small" data-lobby="share" ${n.status === 'connecting' ? 'disabled' : ''}>Share…</button>` : ''}
       </div>
       <p class="lobby-wait"><span class="spinner"></span>${n.status === 'connecting' ? 'Creating game…' : n.status === 'connected' ? 'Friend connected! Starting…' : 'Waiting for your friend to join…'}</p>
-      <p class="lobby-help">Send the invite link to your friend. Clicking it joins your game straight away. (Or they can open Gerasimos Gambit, click <b>Play Online</b> and type the code.) You'll play White in <b>${mode.icon} ${mode.name}</b>.</p>
+      <p class="lobby-help">Send the invite link to your friend. Clicking it joins your game straight away. (Or they can open Gerasimos Gambit, click <b>Play Online</b> and type the code.) You'll play <b>${mode.icon} ${mode.name}</b>, and colours are picked at random.</p>
       <button class="btn" data-lobby="cancel">Cancel</button>`;
   } else if (n && n.role === 'guest' && n.status !== 'error' && n.status !== 'closed') {
     body = `<p class="lobby-wait"><span class="spinner"></span>Connecting to game <b>${esc(n.code)}</b>…</p>

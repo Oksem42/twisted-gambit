@@ -471,3 +471,90 @@ a { color: inherit; }
 .mg-opp { min-width: 140px; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 12px; border-radius: 8px; background: #1f1e1b; }
 .mg-tap { min-width: 150px; font-size: 22px; touch-action: manipulation; }
 .mg-status { margin-top: 10px; min-height: 22px; font-weight: 800; font-size: 18px; color: var(--gold); }
+
+/* ------------------------------------------------ power effects (build up, then act) */
+.fx-layer { position: absolute; inset: 0; z-index: 30; pointer-events: none; overflow: hidden; }
+.fx { position: absolute; pointer-events: none; display: grid; place-items: center; }
+.fx .gi { width: 70%; height: 70%; }
+.pc.pop, .wall-tile.pop { animation: fx-pop .55s cubic-bezier(.3, 1.6, .5, 1) backwards; }
+@keyframes fx-pop { from { transform: scale(.05); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes fx-fade { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fx-burst { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
+
+/* Piston: slides in, winds back, then punches (at ~700ms) */
+.fx-piston span { display: grid; place-items: center; width: 70%; height: 70%; color: #e8e6e3; filter: drop-shadow(0 2px 3px #000a); }
+.fx-piston span .gi { width: 100%; height: 100%; stroke-width: 2.4; }
+.fx-piston { animation: fx-punch 1.25s ease-in-out forwards; }
+@keyframes fx-punch {
+  0% { transform: translate(calc(var(--dx) * -1.4), calc(var(--dy) * -1.4)); opacity: 0; }
+  25% { transform: translate(calc(var(--dx) * -.9), calc(var(--dy) * -.9)); opacity: 1; }
+  52% { transform: translate(calc(var(--dx) * -1.3), calc(var(--dy) * -1.3)); }
+  58% { transform: translate(var(--dx), var(--dy)); }
+  80% { transform: translate(var(--dx), var(--dy)); opacity: 1; }
+  100% { transform: translate(calc(var(--dx) * .6), calc(var(--dy) * .6)); opacity: 0; }
+}
+
+/* Magnet: drops in, hums, rings shrink toward it faster and faster while the pieces are sucked in */
+.fx-magnet .gi { position: relative; z-index: 1; color: #e04a3a; width: 62%; height: 62%; stroke-width: 2.4; filter: drop-shadow(0 2px 3px #000a); animation: fx-mag-in .5s cubic-bezier(.3, 1.6, .5, 1) backwards, fx-hum .09s linear .5s 18 alternate, fx-fade .3s ease-in 1.8s forwards; }
+.fx-magnet i { position: absolute; inset: 0; border: 3px solid #3fb6ff; border-radius: 50%; opacity: 0; animation: fx-pull 1.2s cubic-bezier(.55, 0, 1, .45) .3s 2; }
+.fx-magnet i:nth-child(3) { animation-delay: .5s; } .fx-magnet i:nth-child(4) { animation-delay: .7s; } .fx-magnet i:nth-child(5) { animation-delay: .9s; }
+@keyframes fx-mag-in { from { transform: translateY(-80%) scale(.4); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fx-hum { from { transform: translateX(-1.5px) rotate(-3deg); } to { transform: translateX(1.5px) rotate(3deg); } }
+@keyframes fx-pull { from { transform: scale(4); opacity: 0; } 30% { opacity: .85; } to { transform: scale(.15); opacity: 0; } }
+
+/* Tornado: a funnel spins up, then whirls the pieces round */
+.fx-tornado { border-radius: 50%; background: radial-gradient(circle, #ffffff50, #b7c9d466 40%, transparent 70%); animation: fx-twist 1.85s cubic-bezier(.4, 0, .6, 1) forwards; }
+.fx-tornado span { width: 55%; height: 55%; color: #fff; display: grid; place-items: center; }
+.fx-tornado .gi { width: 100%; height: 100%; stroke-width: 2.6; }
+@keyframes fx-twist { 0% { transform: rotate(0) scale(.15); opacity: 0; } 40% { transform: rotate(540deg) scale(.9); opacity: 1; } 85% { transform: rotate(1500deg) scale(1.05); opacity: 1; } 100% { transform: rotate(1800deg) scale(1.2); opacity: 0; } }
+
+/* Bowling ball: appears, wobbles, then rolls up the column */
+.fx-ball b { width: 62%; height: 62%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #6d7cff, #1c2477 70%); box-shadow: 0 4px 8px #000a; animation: fx-roll 1.8s linear forwards; }
+.fx-ball { animation: fx-ball-move 1.75s linear forwards; }
+@keyframes fx-ball-move { 0% { transform: translate(0, 0) scale(.3); opacity: 0; } 15% { transform: translate(0, 0) scale(1); opacity: 1; } 20% { transform: translate(0, 0); } 95% { transform: translate(var(--dx), var(--dy)); opacity: 1; } 100% { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+@keyframes fx-roll { 0%, 20% { transform: rotate(0); } 100% { transform: rotate(1100deg); } }
+
+/* Leaf blower: the blower revs, gusts get stronger, then the pawns are blown back */
+.fx-wind { overflow: hidden; background: linear-gradient(#cfeaff00, #cfeaff30, #cfeaff00); animation: fx-fade .4s ease-in 1.3s forwards; }
+.fx-wind i { position: absolute; top: 0; width: 3px; height: 70%; border-radius: 3px; background: #ffffffcc; opacity: 0; animation: fx-gust .7s cubic-bezier(.4, 0, .8, .6) 3; }
+.fx-wind i:nth-child(n+4) { animation-duration: .55s; } .fx-wind i:nth-child(n+7) { animation-duration: .4s; }
+@keyframes fx-gust { from { transform: translateY(calc(var(--dir) * -120%)); opacity: 0; } 30% { opacity: .95; } to { transform: translateY(calc(var(--dir) * 170%)); opacity: 0; } }
+.fx-wind span { position: absolute; left: 2%; width: 12%; height: 80%; color: #e8f6ff; display: grid; place-items: center; animation: fx-blow .12s ease-in-out 12 alternate; }
+.fx-wind span .gi { width: 100%; height: 100%; stroke-width: 2.4; }
+@keyframes fx-blow { from { transform: translateX(-8%) scale(.95); } to { transform: translateX(8%) scale(1.05); } }
+
+/* Earthquake: a rumble that grows, the row cracks, pieces hop sideways */
+.board-wrap.quaking { animation: fx-quake 1.15s linear; }
+@keyframes fx-quake {
+  0% { transform: none; } 10% { transform: translateX(-1px); } 20% { transform: translateX(2px); } 30% { transform: translateX(-3px); }
+  40% { transform: translateX(4px) rotate(.2deg); } 50% { transform: translateX(-7px) rotate(-.4deg); } 60% { transform: translateX(9px) rotate(.5deg); }
+  70% { transform: translateX(-8px) rotate(-.4deg); } 80% { transform: translateX(5px); } 90% { transform: translateX(-2px); } 100% { transform: none; }
+}
+.fx-quake-row { background: repeating-linear-gradient(100deg, transparent 0 18px, #3a1d1288 18px 21px); animation: fx-crack 1.3s ease-in forwards; }
+@keyframes fx-crack { 0% { opacity: 0; } 45% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Brick wall: a shadow and dust gather, then the bricks drop in */
+.fx-dust { border-radius: 50%; background: radial-gradient(circle, #1f1e1b88, #c9a47a66 40%, transparent 68%); animation: fx-gather 1.25s ease-out forwards; }
+@keyframes fx-gather { 0% { transform: scale(.2); opacity: 0; } 45% { transform: scale(.9); opacity: 1; } 55% { transform: scale(1.5); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+
+/* Banana peel: tossed in with a spin */
+.fx-drop { color: #f7d847; animation: fx-drop .95s cubic-bezier(.3, 1.5, .5, 1) forwards; }
+.fx-drop .gi, .fx-slip .gi { stroke-width: 2.4; filter: drop-shadow(0 2px 3px #000a); }
+@keyframes fx-drop { 0% { transform: translateY(-160%) rotate(-200deg); opacity: 0; } 55% { transform: translateY(0) rotate(10deg); opacity: 1; } 75% { transform: translateY(0) rotate(0); opacity: 1; } 100% { opacity: 0; } }
+.fx-slip { color: #f7d847; animation: fx-slip 1.15s ease-out forwards; }
+@keyframes fx-slip { 0% { transform: scale(.6); opacity: 0; } 25% { transform: scale(1) rotate(0); opacity: 1; } 100% { transform: scale(1.4) rotate(540deg); opacity: 0; } }
+
+/* Portals: a ring opens up; warps flash at both ends */
+.fx-portal-pop, .fx-warp { border-radius: 50%; }
+.fx-portal-pop { box-shadow: 0 0 0 4px #b46cff, 0 0 24px #b46cff; animation: fx-open 1.25s ease-out forwards; }
+@keyframes fx-open { 0% { transform: scale(0) rotate(0); opacity: 0; } 55% { transform: scale(.85) rotate(240deg); opacity: 1; } 100% { transform: scale(1.2) rotate(360deg); opacity: 0; } }
+.fx-warp { background: radial-gradient(circle, #e3c7ff, #b46cff99 40%, transparent 70%); animation: fx-burst .7s ease-out .25s backwards; }
+.fx-warp.late { animation-delay: .75s; }
+
+/* Time rewind: the board drains of colour, a clock spins backwards, then pieces glide back */
+.board-wrap.rewinding .board { animation: fx-sepia 1.6s ease-in-out; }
+@keyframes fx-sepia { 0%, 100% { filter: none; } 35%, 70% { filter: sepia(1) hue-rotate(-20deg) brightness(.85); } }
+.fx-rewind { color: #fff; animation: fx-rewind 1.55s ease-in-out forwards; }
+.fx-rewind .gi { width: 80%; height: 80%; stroke-width: 2.2; filter: drop-shadow(0 3px 6px #000c); }
+@keyframes fx-rewind { 0% { transform: rotate(0) scale(.4); opacity: 0; } 30% { opacity: 1; } 80% { transform: rotate(-720deg) scale(1); opacity: 1; } 100% { transform: rotate(-800deg) scale(1.15); opacity: 0; } }
+.mg-leave { margin-top: 10px; }
