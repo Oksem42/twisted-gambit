@@ -6,10 +6,10 @@
 const E = globalThis.TGEngine;
 
 const MATE = 100000, WIN = 90000, INF = 1000000;
-const TYPE = { P: 1, N: 2, B: 3, R: 4, Q: 5, K: 6 };
+const TYPE = { P: 1, N: 2, B: 3, R: 4, Q: 5, K: 6, S: 5, X: 7 }; // the Snake moves like a queen; X = a wall
 const LETTER = ['', 'P', 'N', 'B', 'R', 'Q', 'K'];
-const VAL = [0, 100, 320, 330, 500, 900, 20000];
-const PHASE = [0, 0, 1, 1, 2, 4, 0];
+const VAL = [0, 100, 320, 330, 500, 900, 20000, 0];
+const PHASE = [0, 0, 1, 1, 2, 4, 0, 0];
 
 // Piece-square tables from White's point of view, a8..h8 first.
 const PST = [null,
@@ -86,6 +86,7 @@ function gen(S, out, capsOnly) {
     const v = b[s];
     if (!v || (v > 0) !== (us > 0)) continue;
     const t = v > 0 ? v : -v;
+    if (t === 7) continue; // walls never move
     if (t === 1) {
       const dir = us > 0 ? 8 : -8, r = s >> 3, f = s & 7, pre = us > 0 ? 6 : 1, start = us > 0 ? 1 : 6;
       const to = s + dir;
@@ -233,7 +234,7 @@ function evaluate(S) {
     const v = b[s];
     if (!v) continue;
     const c = v > 0 ? 1 : -1, t = v * c;
-    if (t === 6) continue;
+    if (t >= 6) continue;
     mat += c * VAL[t];
     pos += c * PST[t][tbl(s, c)];
     phase += PHASE[t];
@@ -556,7 +557,7 @@ function fromGame(G, botColor) {
   G.board.forEach((p, i) => {
     if (!p) return;
     const t = TYPE[p.owner === botColor ? p.type : (p.shown || p.type)];
-    S.b[i] = colorOf(p.owner) * t;
+    S.b[i] = (t === 7 ? bot : colorOf(p.owner)) * t; // walls count as Jules's own, so it never tries to take one
     if (t === 6) { if (p.owner === E.W) S.kW = i; else S.kB = i; }
   });
   const unmoved = (i, owner, type) => { const p = G.board[i]; return p && p.owner === owner && (p.owner === botColor ? p.type : p.shown) === type && !p.moved; };
@@ -638,6 +639,7 @@ function chooseAction(G, opts = {}) {
     } catch (e) { if (e !== STOP) throw e; }
   }
 
+  if (G.twists.powers) { const pw = choosePower(G, botColor, action, ms); if (pw) action = pw; }
   if (!action) return null;
 
   // Prophecy: predict the reply Jules's own analysis expects.
@@ -657,6 +659,48 @@ function chooseAction(G, opts = {}) {
     } catch { /* no prophecy this time */ }
   }
   return action;
+}
+
+// ---------------------------------------------------------------- Power Chess
+const PRIZE_CP = { snake: 700, asteroids: 220, tug: 110 }; // what winning each minigame is worth to Jules
+/** Compare the chosen move with every power Jules holds, each searched with the real rules. */
+function choosePower(G, botColor, action, ms) {
+  deadline = Date.now() + Math.max(250, ms * 0.5);
+  let best = null, bestScore = -INF;
+  try {
+    if (action) bestScore = scoreAction(G, botColor, (g) => (action.type === 'swap' ? E.doSwap(g, action.a, action.b) : E.makeMove(g, action.move)), 1);
+    const pass = scoreAction(G, botColor, (g) => { g.turn = E.other(botColor); }, 1);
+    for (let k = 0; k < 3; k++) {
+      const opts = E.powerOptions(G, botColor, k);
+      if (!opts.length) continue;
+      const id = G.powers[botColor][k].id;
+      if (E.POWERS[id].game) { // Jules wins most minigames, so it values the prize highly
+        const sc = pass + PRIZE_CP[id] * 0.75 - 40;
+        if (sc > bestScore) { bestScore = sc; best = { type: 'power', slot: k, args: {} }; }
+        continue;
+      }
+      const sample = opts.length > 40 ? opts.slice().sort(() => Math.random() - 0.5).slice(0, 40) : opts;
+      const trap = id === 'banana' || id === 'portals' || id === 'wall' ? 15 : 0;
+      for (const o of sample) {
+        const sc = scoreAction(G, botColor, (g) => E.usePower(g, k, o.args), 1) + trap;
+        if (sc > bestScore + 25) { bestScore = sc; best = { type: 'power', slot: k, args: o.args }; }
+      }
+    }
+  } catch (e) { if (e !== STOP) throw e; }
+  return best;
+}
+/** Tug of War prize: the best enemy piece to push before moving. */
+function pickPush(G) {
+  const c = G.turn, opts = E.freePushOptions(G, c);
+  deadline = Date.now() + 700;
+  let best = opts[0] && opts[0].args, bs = -INF;
+  try {
+    for (const o of opts.slice(0, 60)) {
+      const sc = scoreAction(G, c, (g) => E.freePush(g, o.args.from, o.args.to), 1);
+      if (sc > bs) { bs = sc; best = o.args; }
+    }
+  } catch (e) { if (e !== STOP) throw e; }
+  return best;
 }
 
 /** Secret setup, chosen on purpose. */
@@ -680,5 +724,5 @@ function acceptsDraw(G) {
   return e < -150;
 }
 
-globalThis.TGJules = { NAME: 'Jules', setup, chooseAction, acceptsDraw, _internal: { fromGame, gen, play, unmake, evaluate, legalKeys, rootSearch } };
+globalThis.TGJules = { NAME: 'Jules', setup, chooseAction, acceptsDraw, pickPush, _internal: { fromGame, gen, play, unmake, evaluate, legalKeys, rootSearch } };
 })();

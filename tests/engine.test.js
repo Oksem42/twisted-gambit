@@ -415,6 +415,97 @@ test('bare kings are not a draw, since the shop can add material', () => {
   eq(s.result, null); eq(s.coins.w, 1);
 });
 
+// ------------------------------------------------ Power Chess
+const PW = { powers: true };
+const withPower = (s, c, id) => { s.powers[c] = [{ id, wait: 0 }, { id: 'snake', wait: 5 }, { id: 'tug', wait: 5 }]; };
+test('powers: three random slots each, drawn the same from the same seed', () => {
+  const a = E.newGame(PW, seq([0.42])), b = E.newGame(PW, seq([0.42]));
+  eq(a.powers.w.length, 3); eq(JSON.stringify(a.powers), JSON.stringify(b.powers));
+  eq(new Set(a.powers.w.map((p) => p.id)).size, 3);
+});
+test('piston shoves a line of pieces, never a king', () => {
+  const s = position({ e1: 'wK', e8: 'bK', c4: 'wN', d4: 'bP' }, 'w', PW);
+  withPower(s, 'w', 'piston');
+  ok(!E.powerOptions(s, 'w', 0).some((o) => o.args.from === S('e1')), 'king is immovable');
+  E.usePower(s, 0, { from: S('c4'), to: S('d4') });
+  eq(s.board[S('d4')].type, 'N'); eq(s.board[S('e4')].type, 'P'); eq(s.turn, 'b');
+  eq(s.powers.w[0].wait, 3);
+});
+test('a used power comes back as a new random power after 3 turns', () => {
+  const s = position({ e1: 'wK', e8: 'bK', a2: 'wP', h7: 'bP' }, 'w', PW);
+  withPower(s, 'w', 'blower');
+  s.board[S('h7')] = null; s.board[S('a6')] = { id: 90, owner: 'b', type: 'P', shown: 'P', moved: true };
+  E.usePower(s, 0, { rank: 5 });
+  eq(s.board[S('a7')].type, 'P');
+  mv(s, 'e8', 'd8'); mv(s, 'e1', 'd1'); mv(s, 'd8', 'e8'); mv(s, 'd1', 'e1'); mv(s, 'e8', 'd8');
+  eq(s.powers.w[0].wait, 1);
+  mv(s, 'e1', 'd1');
+  eq(s.powers.w[0].wait, 0); ok(s.powers.w[0].id !== 'blower', 'a different power came back');
+});
+test('a power may not leave your own king in check', () => {
+  const s = position({ e1: 'wK', e2: 'wR', e8: 'bR', a8: 'bK' }, 'w', PW);
+  withPower(s, 'w', 'piston');
+  ok(!E.powerOptions(s, 'w', 0).some((o) => o.args.from === S('e2') && o.args.to === S('d2')), 'pinned rook stays');
+});
+test('magnet, tornado, bowling ball and earthquake move pieces as described', () => {
+  let s = position({ e1: 'wK', h8: 'bK', d7: 'bR', a4: 'bN' }, 'w', PW);
+  withPower(s, 'w', 'magnet'); E.usePower(s, 0, { at: S('d4') });
+  eq(s.board[S('d6')].type, 'R'); eq(s.board[S('b4')].type, 'N');
+  s = position({ e1: 'wK', h8: 'bK', c5: 'bN' }, 'w', PW);
+  withPower(s, 'w', 'tornado'); E.usePower(s, 0, { at: S('d4') });
+  eq(s.board[S('e5')].type, 'N');
+  s = position({ e1: 'wK', h8: 'bK', b3: 'wP', b6: 'bB' }, 'w', PW);
+  withPower(s, 'w', 'bowling'); E.usePower(s, 0, { file: 1 });
+  eq(s.board[S('a3')].type, 'P'); eq(s.board[S('a6')].type, 'B');
+  s = position({ e1: 'wK', h8: 'bK', a5: 'bP', c5: 'wN', h5: 'bQ' }, 'w', PW);
+  withPower(s, 'w', 'quake'); E.usePower(s, 0, { rank: 4, dir: 1 });
+  eq(s.board[S('b5')].type, 'P'); eq(s.board[S('d5')].type, 'N'); eq(s.board[S('h5')].type, 'Q');
+});
+test('brick walls block movement and crumble after 3 turns', () => {
+  const s = position({ a1: 'wR', e1: 'wK', h8: 'bK' }, 'w', PW);
+  withPower(s, 'w', 'wall');
+  E.usePower(s, 0, { a: S('a4'), b: S('h4') });
+  eq(s.board[S('a4')].type, 'X');
+  mv(s, 'h8', 'g8');
+  ok(!E.legalMoves(s, S('a1')).some((m) => E.rankOf(m.to) >= 3), 'cannot pass the wall');
+  mv(s, 'e1', 'd1'); mv(s, 'g8', 'h8'); mv(s, 'd1', 'e1'); mv(s, 'h8', 'g8');
+  eq(s.board[S('a4')], null);
+});
+test('banana peels make enemy pieces slide; portals warp them', () => {
+  let s = position({ e1: 'wK', h8: 'bK', a1: 'wR' }, 'b', PW);
+  withPower(s, 'b', 'banana'); E.usePower(s, 0, { at: S('a4') });
+  mv(s, 'a1', 'a4');
+  eq(s.board[S('a8')].type, 'R');
+  s = position({ e1: 'wK', h8: 'bK', a1: 'wR' }, 'b', PW);
+  withPower(s, 'b', 'portals'); E.usePower(s, 0, { a: S('a3'), b: S('f6') });
+  mv(s, 'a1', 'a3');
+  eq(s.board[S('f6')].type, 'R');
+});
+test('time rewind undoes the last two moves', () => {
+  const s = E.newGame(PW);
+  withPower(s, 'w', 'rewind');
+  mv(s, 'e2', 'e4'); mv(s, 'e7', 'e5');
+  E.usePower(s, 0, {});
+  eq(s.turn, 'w'); eq(s.board[S('e2')].type, 'P'); eq(s.board[S('e7')].type, 'P'); eq(s.board[S('e4')], null);
+});
+test('minigame prizes: snake piece, double move, free push', () => {
+  let s = E.newGame(PW);
+  withPower(s, 'w', 'snake'); E.usePower(s, 0, {});
+  ok(s.minigame, 'minigame running'); eq(E.legalMoves(s, S('e2')).length, 0);
+  E.finishMinigame(s, { w: 100, b: 300 });
+  ok(s.board.some((p) => p && p.type === 'S' && p.owner === 'b'), 'black got a snake'); eq(s.turn, 'b');
+  s = E.newGame(PW);
+  withPower(s, 'w', 'asteroids'); E.usePower(s, 0, {}); E.finishMinigame(s, { w: 9, b: 3 });
+  mv(s, 'e7', 'e5'); mv(s, 'e2', 'e4'); eq(s.turn, 'w');
+  s = E.newGame(PW);
+  withPower(s, 'w', 'tug'); E.usePower(s, 0, {}); E.finishMinigame(s, { w: 1, b: 30 });
+  ok(E.freePushOptions(s, 'b').length > 0, 'black may push');
+});
+test('the Snake piece moves like a king and a queen', () => {
+  const s = position({ e1: 'wK', h7: 'bK', d4: 'wS' }, 'w', PW);
+  eq(E.legalMoves(s, S('d4')).length, 27);
+});
+
 globalThis.TGTestResults = results;
 
 // Node runner

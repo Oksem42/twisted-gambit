@@ -4,6 +4,7 @@ const { pieceSVG, tokenSVG } = globalThis.TGPieces;
 const I = globalThis.TGIcons;
 const Bot = globalThis.TGBot;
 const Jules = globalThis.TGJules;
+const Mini = globalThis.TGMini;
 const BOTS = {
   v1: { engine: Bot, name: Bot.NAME, tag: 'A friendly sparring partner', icon: I.robot },
   jules: { engine: Jules, name: Jules.NAME, tag: 'Best chess player of all time', icon: I.crown },
@@ -29,6 +30,8 @@ const MODES = [
     desc: 'Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look.' },
   { key: 'gambler', name: "Gambler's Gambit", icon: I.wheel,
     desc: 'Every capture spins a wheel, and better pieces get bigger slices. Whoever it lands on takes the other. Only the king always wins. Earn coins and buy new pieces in the shop.' },
+  { key: 'powers', name: 'Power Chess', icon: I.bolt,
+    desc: 'Hold 3 random powers: minigame duels, pistons, magnets, portals, banana peels and more. A used power recharges for 3 turns and comes back as a new random one.' },
 ];
 const modeInfo = (k) => MODES.find((m) => m.key === k) || MODES[0];
 
@@ -387,6 +390,14 @@ function applyRemote(a) {
         const spin = G.twists.gambler ? E.previewSpin(G, a.move) : null;
         return spin && spin.odds < 1 ? showSpin(spin, go) : go();
       }
+      case 'power':
+        if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
+        E.usePower(G, a.slot, a.args); return afterPower();
+      case 'freePush': E.freePush(G, a.from, a.to); ui.anim = [{ from: a.from, to: a.to }]; sound('move'); break;
+      case 'mgScore':
+        if (ui.mg) { ui.mg.scores[a.color] = a.score; ui.mg.handle.remote(a.color, a.score, true); finishMinigameUI(); }
+        return;
+      case 'mgProg': if (ui.mg) ui.mg.handle.remote(a.color, a.score, false); return;
       case 'buy':
         if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
         E.buyPiece(G, a.piece, a.sq); sound('reveal'); ui.fresh = a.sq; return afterAction();
@@ -412,6 +423,7 @@ function applyRemote(a) {
 
 // ---------------------------------------------------------------- rendering
 function pieceHTML(p, extra = '') {
+  if (p.type === 'X') return `<div class="wall-tile" title="Brick wall">${I.pw_wall}</div>`;
   const omni = isOmni();
   const seeTrue = omni || p.owner === ui.viewer;
   const t = seeTrue ? p.type : p.shown;
@@ -445,6 +457,10 @@ function pickSets() {
   } else if (step === 'shifter') {
     each((p, i) => { if (p.owner === c && p.type !== 'K') pickable.add(i); });
     const f = E.findById(G, G.shifter[c]); if (f) picked.add(f.sq);
+  } else if ((ui.tool === 'power' || ui.tool === 'freepush') && ui.power) {
+    const k = ui.power.picks.length;
+    for (const o of powerMatches()) if (o.clicks[k]) o.clicks[k].forEach((i) => pickable.add(i));
+    ui.power.picks.forEach((i) => picked.add(i));
   } else if (ui.tool === 'buy') {
     E.legalDrops(G, c, ui.buyType).forEach((i) => pickable.add(i));
   } else if (ui.predict) {
@@ -484,6 +500,10 @@ function renderBoard() {
       const m = targets.get(i);
       if (m) inner += p || m.ep ? '<span class="ring"></span>' : '<span class="dot"></span>';
       if (ui.phase !== 'menu' && (isOmni() ? [W, B] : [ui.viewer]).some((c) => G.mines[c].includes(i))) inner += `<span class="mine" title="Mine">${I.mine}</span>`;
+      if (G.twists.powers && ui.phase !== 'menu') {
+        for (const c of [W, B]) { const pr = G.portals[c]; if (pr && (pr.a === i || pr.b === i)) inner += `<span class="portal ${c}" title="${COLOR[c]}'s portal"></span>`; }
+        if ((isOmni() ? [W, B] : [ui.viewer]).some((c) => G.bananas[c].includes(i))) inner += `<span class="banana" title="Banana peel">${I.pw_banana}</span>`;
+      }
       if (ui.phase !== 'menu' && G.lastExplosion === i) inner += `<span class="boom">${I.boom}</span>`;
       html += `<div class="${cls.join(' ')}" data-sq="${i}">${inner}</div>`;
     }
@@ -521,13 +541,14 @@ function publicChips(c) {
     const id = G.shifter[c];
     return `<span class="chip ${id != null && !E.findById(G, id) ? 'spent' : ''}" title="Shapeshifter">${I.shifter} shapeshifter</span>`;
   }
+  if (t.powers) return `<span class="chip" title="Powers ready to use">${I.bolt} ${G.powers[c].filter((p) => !p.wait).length}/3 ready</span>`;
   if (t.gambler) return `<span class="chip coin-chip" title="Coins">${I.coin} ${G.coins[c]}</span>`;
   return '';
 }
 
 function capturedHTML(c) {
   const caps = G.captured[c].filter((x) => x.owner !== c);
-  const groups = ['P', 'N', 'B', 'R', 'Q', 'K'].map((t) => caps.filter((x) => x.type === t)).filter((g) => g.length);
+  const groups = ['P', 'N', 'B', 'R', 'Q', 'S', 'K'].map((t) => caps.filter((x) => x.type === t)).filter((g) => g.length);
   const adv = material(c) - material(other(c));
   return groups.map((g) => `<span class="grp">${g.map((x) => pieceSVG(x.type, x.owner)).join('')}</span>`).join('')
     + (adv > 0 ? `<span class="adv">+${adv}</span>` : '');
@@ -568,6 +589,7 @@ function renderPromo() {
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 function slidesFor(move) {
   if (G.lastSpin && !G.lastSpin.won) return []; // the attacker lost its spin, so nothing travels
+  if (G.lastMove && G.lastMove.from === move.from && G.lastMove.to !== move.to) return [{ from: move.from, to: G.lastMove.to }]; // slipped or warped
   const out = [{ from: move.from, to: move.to }];
   const p = G.board[move.to];
   if (p && p.type === 'K' && Math.abs(E.fileOf(move.to) - E.fileOf(move.from)) === 2) { // castling: the rook moves too
@@ -652,6 +674,9 @@ function secretItems(c) {
       : (pr.state === 'hit' ? 'last one came true!' : 'last one missed.') + again;
     items.push(`<li><span class="ic">${I.prophecy}</span><div>Prophecy: <b>${txt}</b></div></li>`);
   }
+  if (t.powers && G.bananas[c].length) {
+    items.push(`<li><span class="ic">${I.pw_banana}</span><div>Your hidden banana peels: <b>${G.bananas[c].map(E.sqName).join(', ')}</b></div></li>`);
+  }
   if (t.shifter) {
     const id = G.shifter[c], f = E.findById(G, id);
     const txt = id == null ? 'not chosen yet' : !f ? 'captured'
@@ -718,6 +743,116 @@ function shopCard() {
     <p class="shop-help">Buying uses your turn. Place it on an empty square in your half. It can block a check, but can't give one.</p></div>`;
 }
 
+const POWER_HINT = {
+  piston: ['Click a piece to shove (not a king).', 'Click the square to shove it toward.'],
+  magnet: ['Click the square to put the magnet on.'],
+  tornado: ['Click the centre of the 3×3 area to spin.'],
+  bowling: ['Click any square in the column to bowl up.'],
+  blower: ['Click any square in the row to blow.'],
+  quake: ['Click the left half of a row to shake it left, or the right half to shake it right.'],
+  wall: ['Click an empty square for the first wall.', 'Click a second empty square.'],
+  portals: ['Click an empty square for the first portal.', 'Click a second empty square for the other end.'],
+  banana: ['Click an empty square to hide the peel.'],
+  freepush: ['Click an enemy piece to push.', 'Click the empty square to push it to.'],
+};
+const PRIZE_NAME = { snake: 'the Snake piece', tug: 'a free push', asteroids: 'a double move' };
+
+function powersCard() {
+  if (!G.twists.powers || ui.phase !== 'play') return '';
+  const c = ui.viewer, act = canAct();
+  const slots = G.powers[c].map((pw, k) => {
+    const P = E.POWERS[pw.id], ready = !pw.wait;
+    const usable = act && ready && E.powerOptions(G, c, k).length > 0;
+    const on = ui.tool === 'power' && ui.power && ui.power.slot === k;
+    return `<button class="power-slot ${on ? 'on' : ''} ${ready ? '' : 'charging'}" data-act="power" data-slot="${k}" ${usable ? '' : 'disabled'} title="${esc(ready ? P.desc : 'Recharging: a new random power arrives when it’s done.')}">
+      <span class="ps-ic">${ready ? I['pw_' + pw.id] : I.clock}</span><span class="ps-name">${ready ? P.name : 'Recharging'}</span>
+      <span class="ps-state">${ready ? (P.game ? 'Minigame' : 'Ready') : `${Math.min(pw.wait, E.POWER_RECHARGE)} turn${Math.min(pw.wait, E.POWER_RECHARGE) === 1 ? '' : 's'}`}</span></button>`;
+  }).join('');
+  const push = act && E.freePushOptions(G, c).length && ui.tool !== 'freepush' ? `<button class="btn primary" data-act="freepush">${I.pw_tug} Use your free push</button>` : '';
+  return `<div class="card powers"><h3>${I.bolt} Powers</h3><div class="power-grid">${slots}</div>${push}
+    <p class="shop-help">Using a power takes your turn. A used power recharges for ${E.POWER_RECHARGE} turns, then comes back as a new random one. Hover a power to read what it does.</p></div>`;
+}
+function powerMatches() {
+  const { opts, picks } = ui.power;
+  return opts.filter((o) => picks.every((p, k) => o.clicks[k] && o.clicks[k].includes(p)));
+}
+function powerClick(i) {
+  const pw = ui.power;
+  if (pw.picks.includes(i)) { pw.picks = pw.picks.filter((x) => x !== i); return render(); }
+  const k = pw.picks.length;
+  if (!powerMatches().some((o) => o.clicks[k] && o.clicks[k].includes(i))) return;
+  pw.picks.push(i);
+  const done = powerMatches().find((o) => o.clicks.length === pw.picks.length);
+  if (done) return ui.tool === 'freepush' ? doFreePush(done.args) : doPower(pw.slot, done.args);
+  render();
+}
+function doPower(slot, args) {
+  tick();
+  const t = Math.round(ui.clock[ui.viewer]);
+  try { E.usePower(G, slot, args); } catch (e) { ui.flash = e.message; ui.tool = null; ui.power = null; return render(); }
+  sendAct({ kind: 'power', slot, args, t });
+  afterPower();
+}
+function afterPower() {
+  sound('reveal');
+  ui.tool = null; ui.power = null; ui.fresh = null; ui.anim = null; ui.flash = '';
+  if (G.minigame) return startMinigameUI();
+  afterAction();
+}
+function doFreePush(args) {
+  try { E.freePush(G, args.from, args.to); } catch (e) { ui.flash = e.message; ui.tool = null; return render(); }
+  sendAct({ kind: 'freePush', from: args.from, to: args.to });
+  sound('move');
+  ui.tool = null; ui.power = null; ui.selected = null; ui.moves = [];
+  ui.anim = [{ from: args.from, to: args.to }];
+  render();
+}
+
+// Minigames: both players play at once. Online, each browser runs its own player and sends the score.
+function startMinigameUI() {
+  const mg = G.minigame;
+  if (!mg || ui.mg) return;
+  stopClock();
+  ui.selected = null; ui.moves = []; ui.tool = null; ui.power = null;
+  const players = [W, B].map((c) => ({
+    color: c, name: esc(ui.names[c] || COLOR[c]), bot: ui.bot && ui.bot.id,
+    type: ui.bot && ui.bot.color === c ? 'bot' : ui.online && c !== ui.viewer ? 'remote' : 'local',
+  }));
+  const state = ui.mg = { scores: {}, game: G };
+  render();
+  state.handle = Mini.start($('mg'), {
+    kind: mg.id, seed: mg.seed, players,
+    title: `${E.POWERS[mg.id].name}: ${nm(mg.by)} started it. Winner gets ${PRIZE_NAME[mg.id]}!`,
+    onDone: (c, score) => {
+      if (ui.mg !== state) return;
+      state.scores[c] = score;
+      if (players.find((p) => p.color === c).type === 'local') sendAct({ kind: 'mgScore', color: c, score });
+      finishMinigameUI();
+    },
+    onProgress: ui.online ? (c, score) => sendAct({ kind: 'mgProg', color: c, score }) : null,
+  });
+}
+function finishMinigameUI() {
+  const state = ui.mg;
+  if (!state || state.scores.w == null || state.scores.b == null || state.closing) return;
+  state.closing = true;
+  const s = state.scores, winner = s.w === s.b ? null : s.w > s.b ? W : B;
+  state.handle.result(winner ? `${nm(winner)} wins ${PRIZE_NAME[G.minigame ? G.minigame.id : 'snake']}!` : "It's a tie: no prize.");
+  sound(winner ? 'end' : 'move');
+  setTimeout(() => {
+    if (ui.mg !== state) return;
+    state.handle.stop();
+    ui.mg = null;
+    if (G !== state.game || !G.minigame) return render();
+    try { E.finishMinigame(G, s); } catch (e) { ui.flash = e.message; }
+    ui.anim = null;
+    afterAction();
+  }, 1800);
+}
+function cancelMini() {
+  if (ui.mg) { if (ui.mg.handle) ui.mg.handle.stop(); ui.mg = null; }
+}
+
 function predictCard() {
   const g = ui.predict.guess;
   return `<div class="card alert"><h3>${I.prophecy} Predict their reply</h3>
@@ -729,6 +864,7 @@ function predictCard() {
 
 function playCard() {
   if (ui.predict) return predictCard();
+  if (ui.mg) return `<div class="card"><h3><span class="spinner"></span>Minigame!</h3><p>The clocks are paused until it ends.</p></div>`;
   if (ui.spinning) return `<div class="card"><h3><span class="spinner"></span>Spinning the wheel…</h3><p>The clock is paused until it lands.</p></div>`;
   const c = G.turn;
   if (G.turn !== ui.viewer) {
@@ -746,7 +882,12 @@ function playCard() {
     hint = `${I.wheel} <b class="check-txt">You lost the spin and your king is exposed.</b> Move again to get out of check.`;
   }
   let actions = '';
-  if (ui.tool === 'buy') {
+  if ((ui.tool === 'power' || ui.tool === 'freepush') && ui.power) {
+    const id = ui.tool === 'freepush' ? 'freepush' : G.powers[c][ui.power.slot].id;
+    const steps = POWER_HINT[id], step = steps[Math.min(ui.power.picks.length, steps.length - 1)];
+    hint = id === 'freepush' ? `${I.pw_tug} <b>Free push.</b> ${step}` : `${I['pw_' + id]} <b>${E.POWERS[id].name}:</b> ${E.POWERS[id].desc}<br>${step}`;
+    actions = '<button class="btn" data-act="cancel">Cancel</button>';
+  } else if (ui.tool === 'buy') {
     hint = `${I.shop} Click a highlighted square to place your ${PIECE_NAME[ui.buyType]}.`;
     actions = '<button class="btn" data-act="cancel">Cancel</button>';
   } else if (ui.tool === 'prophecy') {
@@ -796,7 +937,7 @@ function moveText(e) {
   return iconize(esc(e.text).replace(/^(\[traitor\] )?([KQRBN])/, (_, tr, l) => `${tr || ''}${pieceSVG(l, 'w').replace('class="piece-svg"', 'class="piece-svg fig"')}`));
 }
 /** The engine writes [traitor], [boom] etc. in the move history; show them as icons. */
-const iconize = (text) => text.replace(/\[(traitor|boom|swap|prophecy|wheel|coin)\]/g, (_, k) => I[k]);
+const iconize = (text) => text.replace(/\[(traitor|boom|swap|prophecy|wheel|coin|snake|tug|asteroids|rewind|banana|portals|quake|piston|magnet|tornado|bowling|blower|wall)\]/g, (_, k) => I[k] || I['pw_' + k]);
 
 function movesHTML() {
   const h = G.history;
@@ -835,7 +976,7 @@ function renderPanel() {
   } else if (ui.phase === 'play') {
     const showSecrets = ui.online || ui.bot || G.turn === ui.viewer;
     const items = showSecrets ? secretItems(ui.viewer) : '';
-    body = connectionCard() + drawOfferCard() + playCard() + shopCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
+    body = connectionCard() + drawOfferCard() + playCard() + powersCard() + shopCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else {
     body = connectionCard() + overCard();
   }
@@ -1004,6 +1145,10 @@ function botPlay(game, action) {
   if (G !== game || !ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
   action = action || Bot.chooseAction(G);
   if (!action) return;
+  if (action.type === 'power') {
+    try { E.usePower(G, action.slot, action.args); } catch { return; }
+    return afterPower();
+  }
   const move = action.type === 'move' && G.twists.gambler ? { ...action.move, roll: Math.random() } : action.move;
   const go = () => {
     const before = capturesNow();
@@ -1027,6 +1172,11 @@ function botTurn() {
   clearTimeout(botTimer);
   if (!ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
   const game = G;
+  if (G.twists.powers && E.freePushOptions(G, ui.bot.color).length) { // the Tug of War prize comes first
+    const opts = E.freePushOptions(G, ui.bot.color);
+    const o = ui.bot.id === 'jules' ? Jules.pickPush(G) : opts[Math.floor(Math.random() * opts.length)].args;
+    try { E.freePush(G, o.from, o.to); ui.anim = [{ from: o.from, to: o.to }]; sound('move'); render(); } catch { /* skip the push */ }
+  }
   if (ui.bot.id === 'jules') {
     botTimer = setTimeout(() => {
       if (G !== game || !ui.bot || G.turn !== ui.bot.color) return;
@@ -1066,6 +1216,7 @@ function gameOver() {
   ui.phase = 'over';
   ui.showResult = true;
   ui.drawOffered = false;
+  cancelMini();
   clearTimeout(preTimer);
   ui.premoves = []; ui.preSel = false;
   ui.selected = null; ui.moves = []; ui.tool = null;
@@ -1122,6 +1273,7 @@ let spinTimer = null;
 const spinPct = (p) => `${Number((p * 100).toFixed(1))}%`;
 
 function cancelSpin() {
+  cancelMini();
   clearTimeout(spinTimer);
   ui.spinning = false;
   ui.netQueue = [];
@@ -1187,12 +1339,12 @@ function doBuy(type, at) {
 }
 
 function canAct() {
-  return !ui.spinning && ui.phase === 'play' && !G.result && G.turn === ui.viewer && !ui.premoves.length && overlay.classList.contains('hidden');
+  return !ui.spinning && !ui.mg && ui.phase === 'play' && !G.result && G.turn === ui.viewer && !ui.premoves.length && overlay.classList.contains('hidden');
 }
 
 // ---------------------------------------------------------------- premoves (online and bot games)
 let preTimer = null;
-const canPremove = () => !ui.spinning && (ui.online || !!ui.bot) && ui.phase === 'play' && !G.result && G.turn !== ui.viewer
+const canPremove = () => !ui.spinning && !ui.mg && (ui.online || !!ui.bot) && ui.phase === 'play' && !G.result && G.turn !== ui.viewer
   && !ui.predict && overlay.classList.contains('hidden');
 
 /** The board as it will look once the queued premoves are played. */
@@ -1322,6 +1474,7 @@ boardEl.addEventListener('pointerdown', (e) => {
   if (canPremove()) return onPremoveDown(i, e);
   if (!canAct()) return;
   if (ui.tool === 'swap') return onSwapClick(i);
+  if (ui.tool === 'power' || ui.tool === 'freepush') return powerClick(i);
   if (ui.tool === 'buy') {
     if (E.legalDrops(G, ui.viewer, ui.buyType).includes(i)) doBuy(ui.buyType, i);
     return;
@@ -1388,8 +1541,20 @@ panel.addEventListener('click', (e) => {
   if (!btn || btn.disabled) return;
   const act = btn.dataset.act;
   const c = ui.viewer;
-  if (ui.spinning && !['new', 'rules', 'flip'].includes(act)) return;
+  if ((ui.spinning || ui.mg) && !['new', 'rules', 'flip'].includes(act)) return;
   switch (act) {
+    case 'power': {
+      if (!canAct()) return;
+      const k = +btn.dataset.slot, opts = E.powerOptions(G, c, k);
+      if (!opts.length) return;
+      if (!opts[0].clicks.length) return doPower(k, opts[0].args); // minigames and Time Rewind start at once
+      ui.tool = 'power'; ui.power = { slot: k, picks: [], opts }; ui.selected = null; ui.moves = [];
+      return render();
+    }
+    case 'freepush':
+      if (!canAct()) return;
+      ui.tool = 'freepush'; ui.power = { slot: null, picks: [], opts: E.freePushOptions(G, c) }; ui.selected = null; ui.moves = [];
+      return render();
     case 'buy':
       if (!canAct()) return;
       ui.tool = 'buy'; ui.buyType = btn.dataset.piece; ui.selected = null; ui.moves = [];
@@ -1639,6 +1804,8 @@ function openRules() {
         <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check. After using it, it recharges for 5 of your turns.</li>
         <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
         <li><b>Gambler's Gambit:</b> your chance to win a capture is your piece's value divided by both pieces' values (pawn 1, knight 3, bishop 3, rook 5, queen 9). If you win, you capture normally. If you lose, your attacker is removed and the defender stays. Only a king always wins. If losing a spin leaves your king in check, you move again right away, and if you can't escape it's checkmate.</li>
+        <li><b>Power Chess:</b> you always hold 3 powers (hover one to read it). Using a power takes your turn, except Time Rewind, which undoes your last move and your opponent's reply so you can move again. A used power recharges for 3 of your turns, then comes back as a new random power. No power can leave your own king in check, and kings are never pushed, pulled, spun, slipped or warped.</li>
+        <li><b>Minigames:</b> Snake, Asteroid Dodge and Tug of War pop up for both players at once, and the clocks pause. Snake's prize is a Snake piece that moves like a king and a queen combined. Asteroid Dodge's prize is two moves in a row next turn. Tug of War's prize is a free push: on your turn, push one enemy piece one square before you move. In pass &amp; play, White uses W A S D (or A to tap) and Black uses the arrow keys (or L to tap).</li>
         <li><b>Coins and shop:</b> earn 1 coin per move, plus the defeated piece's value when you win a spin, and 2 coins when your attacker loses one. Pawn 3, knight 8, bishop 8, rook 12, queen 20. Buying uses your turn. Bought pieces go on an empty square in your half (pawns not on your back rank), can block a check, and can't give check when placed.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Clock:</b> each player has 10 minutes for the whole game, counting down on their turn. Run out and you lose, unless your opponent only has a king (or a king and one bishop or knight), which is a draw.</li>

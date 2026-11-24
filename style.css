@@ -436,3 +436,38 @@ a { color: inherit; }
 .shop-price { font-size: 12px; }
 .shop-price .gi { width: 12px; height: 12px; }
 .shop-help { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+
+/* ------------------------------------------------ Power Chess */
+.power-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.power-slot { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 8px 4px; border: 2px solid transparent; border-radius: 8px; background: #3d3b38; }
+.power-slot:hover:not(:disabled) { background: #4b4946; }
+.power-slot.on { border-color: var(--green-hi); }
+.power-slot:disabled { opacity: .45; cursor: default; }
+.power-slot.charging { opacity: .38; }
+.ps-ic .gi { width: 28px; height: 28px; color: var(--green-hi); }
+.ps-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 800; }
+.ps-state { font-size: 11px; color: var(--muted); }
+.powers .btn { width: 100%; margin-bottom: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.wall-tile { position: relative; z-index: 2; width: 92%; height: 92%; display: grid; place-items: center; border-radius: 6%; background: #8f4b32; color: #e8c2a8; box-shadow: inset 0 0 0 3px #5e2f1e; }
+.wall-tile .gi { width: 80%; height: 80%; }
+.portal { position: absolute; inset: 9%; border-radius: 50%; z-index: 1; pointer-events: none; border: calc(var(--board) / 150) solid; animation: portal-spin 2.4s linear infinite; }
+.portal.w { border-color: #3fb6ff #3fb6ff55 #3fb6ff #3fb6ff55; box-shadow: 0 0 10px #3fb6ff88; }
+.portal.b { border-color: #f08a24 #f08a2455 #f08a24 #f08a2455; box-shadow: 0 0 10px #f08a2488; }
+@keyframes portal-spin { to { transform: rotate(360deg); } }
+.banana { position: absolute; right: 4%; top: 4%; width: 30%; height: 30%; padding: 3%; border-radius: 50%; background: #1f1e1be0; color: #f7d847; z-index: 3; pointer-events: none; display: grid; place-items: center; }
+.banana .gi { width: 100%; height: 100%; stroke-width: 2.4; }
+.mg { position: absolute; inset: 0; z-index: 45; display: grid; place-items: center; background: rgba(20, 19, 17, .8); overflow: auto; }
+.mg-card { width: min(640px, 96%); padding: 14px; border-radius: 12px; background: var(--panel); box-shadow: 0 12px 34px rgba(0, 0, 0, .55); text-align: center; }
+.mg-title { font-weight: 800; font-size: 16px; }
+.mg-help { font-size: 13px; color: var(--text-2); margin: 4px 0 10px; }
+.mg-arenas { display: flex; gap: 12px; justify-content: center; align-items: stretch; flex-wrap: wrap; }
+.mg-arena { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mg-arena canvas { width: min(300px, 70vw); height: auto; aspect-ratio: 1; border-radius: 6px; touch-action: none; }
+.mg-card.two .mg-arena canvas { width: min(270px, 42vw); }
+.mg-rope { width: 100%; height: auto; border-radius: 6px; margin-bottom: 8px; }
+.mg-name { font-weight: 800; font-size: 13px; }
+.mg-name span { font-weight: 400; color: var(--muted); }
+.mg-score, .mg-oscore { font-size: 13px; color: var(--gold); font-weight: 800; }
+.mg-opp { min-width: 140px; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 12px; border-radius: 8px; background: #1f1e1b; }
+.mg-tap { min-width: 150px; font-size: 22px; touch-action: manipulation; }
+.mg-status { margin-top: 10px; min-height: 22px; font-weight: 800; font-size: 18px; color: var(--gold); }

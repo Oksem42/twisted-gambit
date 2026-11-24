@@ -45,6 +45,13 @@ function chooseAction(s, rng = Math.random) {
       if (spots.length) options.push({ type: 'buy', piece, sq: pick(spots, rng) });
     }
   }
+  if (s.twists.powers) {
+    const ready = [0, 1, 2].filter((k) => E.powerOptions(s, me, k).length > 0);
+    if (ready.length && (rng() < 0.25 || !options.length)) {
+      const k = pick(ready, rng);
+      return { type: 'power', slot: k, args: pick(E.powerOptions(s, me, k), rng).args };
+    }
+  }
   if (!options.length) return null;
   const choice = pick(options, rng);
   if (choice.type !== 'move') return choice;

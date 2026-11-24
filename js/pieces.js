@@ -39,6 +39,15 @@ const SHAPES = {
     <circle cx="65" cy="21" r="5.5"/><circle cx="79" cy="31" r="5.5"/>
     <rect x="31" y="64" width="38" height="9" rx="4"/>
     ${BASE}`,
+  // Snake (Power Chess prize): three coils and a raised head with a forked tongue
+  S: `
+    ${BASE}
+    <ellipse cx="50" cy="69" rx="25" ry="8.5"/>
+    <ellipse cx="50" cy="57" rx="20" ry="7.5"/>
+    <ellipse cx="49" cy="46" rx="14" ry="6.5"/>
+    <path d="M41 45 C38 34 42 24 50 19 C56 15 66 16 69 22 C72 28 67 34 60 33 C55 32 53 36 54 44 Z"/>
+    <circle class="f" cx="62" cy="23.5" r="2.6"/>
+    <path class="d" d="M70 26 L76 27.5 M76 27.5 L79.5 24.5 M76 27.5 L79 31"/>`,
   // King: spiked crown with a jewel, topped by a small cross
   K: `
     <path d="M47.5 4 H52.5 V9 H57 V13 H52.5 V20 H47.5 V13 H43 V9 H47.5 Z"/>
