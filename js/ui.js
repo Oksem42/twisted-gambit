@@ -31,7 +31,7 @@ const MODES = [
   { key: 'gambler', name: "Gambler's Gambit", icon: I.wheel,
     desc: 'Every capture spins a wheel, and better pieces get bigger slices. Whoever it lands on takes the other. Only the king always wins. Earn coins and buy new pieces in the shop.' },
   { key: 'powers', name: '"Regular chess"', icon: I.bolt,
-    desc: 'Hold 3 random powers: minigame duels, pistons, magnets, portals, banana peels and more. A used power recharges for 3 turns and comes back as a new random one.' },
+    desc: 'chess but normal' },
 ];
 const modeInfo = (k) => MODES.find((m) => m.key === k) || MODES[0];
 
