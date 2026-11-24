@@ -14,7 +14,7 @@ Chess with secrets. Pick a game mode, then play a friend on the same device (pas
 | **Prophecy** | After your move, secretly predict your opponent's reply. If they play exactly that, your next turn is a double move (lost if the first move gives check). Recharges 5 turns after each use. |
 | **Shapeshifter** | Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look until it moves in a way that look couldn't, or gives check. |
 | **Gambler's Gambit** | Every capture spins a wheel, with odds based on piece value. The winner takes the other piece, and only the king always wins. Earn coins and spend your turn buying new pieces in the shop. If a lost spin exposes your king, you move again. |
-| **Power Chess** | You always hold 3 powers: minigame duels (Snake, Tug of War, Asteroid Dodge) and board powers (Piston, Magnet, Tornado, Bowling Ball, Leaf Blower, Brick Wall, Banana Peel, Portals, Earthquake, Time Rewind). A used power recharges for 3 turns, then comes back as a new random one. |
+| **"Regular chess"** | You always hold 3 powers: minigame duels (Snake, Tug of War, Asteroid Dodge) and board powers (Piston, Magnet, Tornado, Bowling Ball, Leaf Blower, Brick Wall, Banana Peel, Portals, Earthquake, Time Rewind). A used power recharges for 3 turns, then comes back as a new random one. |
 
 ## Base rules
 

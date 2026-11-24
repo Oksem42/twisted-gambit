@@ -6,10 +6,10 @@
 const E = globalThis.TGEngine;
 
 const MATE = 100000, WIN = 90000, INF = 1000000;
-const TYPE = { P: 1, N: 2, B: 3, R: 4, Q: 5, K: 6, S: 5, X: 7 }; // the Snake moves like a queen; X = a wall
-const LETTER = ['', 'P', 'N', 'B', 'R', 'Q', 'K'];
-const VAL = [0, 100, 320, 330, 500, 900, 20000, 0];
-const PHASE = [0, 0, 1, 1, 2, 4, 0, 0];
+const TYPE = { P: 1, N: 2, B: 3, R: 4, Q: 5, K: 6, S: 8, X: 7 }; // S = the Snake (queen + knight), X = a wall
+const LETTER = ['', 'P', 'N', 'B', 'R', 'Q', 'K', '', 'S'];
+const VAL = [0, 100, 320, 330, 500, 900, 20000, 0, 1150];
+const PHASE = [0, 0, 1, 1, 2, 4, 0, 0, 4];
 
 // Piece-square tables from White's point of view, a8..h8 first.
 const PST = [null,
@@ -62,14 +62,15 @@ function attacked(b, sq, by) {
     if (f < 7 && sq + 9 < 64 && b[sq + 9] === -1) return true;
   }
   const n = 2 * by, k = 6 * by, bi = 3 * by, ro = 4 * by, q = 5 * by;
-  for (const t of KN[sq]) if (b[t] === n) return true;
+  const sn = 8 * by;
+  for (const t of KN[sq]) if (b[t] === n || b[t] === sn) return true;
   for (const t of KG[sq]) if (b[t] === k) return true;
   const rays = RAYS[sq];
   for (let d = 0; d < 8; d++) {
     const a = d < 4 ? ro : bi;
     for (const t of rays[d]) {
       const v = b[t];
-      if (v) { if (v === a || v === q) return true; break; }
+      if (v) { if (v === a || v === q || v === sn) return true; break; }
     }
   }
   return false;
@@ -123,6 +124,7 @@ function gen(S, out, capsOnly) {
         }
       }
     } else {
+      if (t === 8) for (const to of KN[s]) { const w = b[to]; if (!w ? !capsOnly : (w > 0) !== (us > 0)) out.push(enc(s, to)); } // the Snake's knight jumps
       const d0 = t === 3 ? 4 : 0, d1 = t === 4 ? 4 : 8;
       for (let d = d0; d < d1; d++) {
         for (const to of RAYS[s][d]) {
@@ -234,9 +236,9 @@ function evaluate(S) {
     const v = b[s];
     if (!v) continue;
     const c = v > 0 ? 1 : -1, t = v * c;
-    if (t >= 6) continue;
+    if (t === 6 || t === 7) continue;
     mat += c * VAL[t];
-    pos += c * PST[t][tbl(s, c)];
+    pos += c * PST[t === 8 ? 5 : t][tbl(s, c)];
     phase += PHASE[t];
     if (t === 1) { const adv = c > 0 ? (s >> 3) - 1 : 6 - (s >> 3); eg += c * adv * adv * 5; }
     if (t === 3) { if (c > 0) wb++; else bb++; }
@@ -315,7 +317,7 @@ function qsearch(S, alpha, beta, ply) {
 }
 
 function hasPieces(S, c) {
-  for (let s = 0; s < 64; s++) { const v = S.b[s] * c; if (v > 1 && v < 6) return true; }
+  for (let s = 0; s < 64; s++) { const v = S.b[s] * c; if ((v > 1 && v < 6) || v === 8) return true; }
   return false;
 }
 

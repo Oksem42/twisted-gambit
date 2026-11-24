@@ -501,9 +501,11 @@ test('minigame prizes: snake piece, double move, free push', () => {
   withPower(s, 'w', 'tug'); E.usePower(s, 0, {}); E.finishMinigame(s, { w: 1, b: 30 });
   ok(E.freePushOptions(s, 'b').length > 0, 'black may push');
 });
-test('the Snake piece moves like a king and a queen', () => {
+test('the Snake piece moves like a king, a queen and a knight', () => {
   const s = position({ e1: 'wK', h7: 'bK', d4: 'wS' }, 'w', PW);
-  eq(E.legalMoves(s, S('d4')).length, 27);
+  eq(E.legalMoves(s, S('d4')).length, 35);
+  const k = position({ e1: 'wK', e8: 'bK', d6: 'wS' }, 'b', PW);
+  ok(E.inCheck(k.board, 'b'), 'a Snake gives check with a knight jump');
 });
 
 globalThis.TGTestResults = results;

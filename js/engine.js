@@ -20,7 +20,7 @@ const pawnRank = (c) => (c === W ? 1 : 6);
 const lastRank = (c) => (c === W ? 7 : 0);
 
 const PIECE_NAME = { K: 'King', Q: 'Queen', R: 'Rook', B: 'Bishop', N: 'Knight', P: 'Pawn', S: 'Snake' };
-const PIECE_VALUE = { K: 0, Q: 9, R: 5, B: 3, N: 3, P: 1, S: 9 };
+const PIECE_VALUE = { K: 0, Q: 9, R: 5, B: 3, N: 3, P: 1, S: 12 };
 const PROMOTIONS = ['Q', 'R', 'B', 'N'];
 
 const count = (s, c, type) => s.captured[c].filter((x) => x.owner !== c && (!type || x.type === type)).length;
@@ -188,7 +188,7 @@ function attackers(board, target, by) {
   const at = (f, r) => (onBoard(f, r) ? board[sq(f, r)] : null);
   const hit = (f, r, types) => { const p = at(f, r); if (p && p.owner === by && types.includes(p.type)) out.push(sq(f, r)); };
   for (const df of [-1, 1]) hit(f0 + df, r0 - fwd(by), ['P']);
-  for (const [df, dr] of KNIGHT) hit(f0 + df, r0 + dr, ['N']);
+  for (const [df, dr] of KNIGHT) hit(f0 + df, r0 + dr, ['N', 'S']);
   for (const [df, dr] of KING) hit(f0 + df, r0 + dr, ['K']);
   const ray = (dirs, types) => {
     for (const [df, dr] of dirs) {
@@ -247,7 +247,8 @@ function gen(board, from, type, ctrl, dir, ep = null, castlePiece = null) {
     case 'N': step(KNIGHT); break;
     case 'R': slide(ROOK); break;
     case 'B': slide(BISHOP); break;
-    case 'Q': case 'S': slide(ROOK); slide(BISHOP); break; // the Snake: every king and queen move
+    case 'Q': slide(ROOK); slide(BISHOP); break;
+    case 'S': slide(ROOK); slide(BISHOP); step(KNIGHT); break; // the Snake: every king, queen and knight move
     case 'K': {
       step(KING);
       const k = castlePiece;
@@ -633,7 +634,7 @@ function buyPiece(s, type, at) {
 // ---------------------------------------------------------------- Power Chess
 const POWER_RECHARGE = 3;
 const POWERS = {
-  snake: { name: 'Snake', game: true, desc: 'Both players play Snake at the same time. Whoever survives longest gets a Snake piece, which moves like a king and a queen combined.' },
+  snake: { name: 'Snake', game: true, desc: 'Both players play Snake at the same time. Whoever survives longest gets a Snake piece, which moves like a king, a queen and a knight combined.' },
   tug: { name: 'Tug of War', game: true, desc: 'Tap as fast as you can for 5 seconds. The winner gets a free push: move one enemy piece one square.' },
   asteroids: { name: 'Asteroid Dodge', game: true, desc: 'Dodge falling rocks. Whoever survives longest gets a double move on their next turn.' },
   rewind: { name: 'Time Rewind', desc: "Undo your last move and your opponent's reply. It's your turn again." },
@@ -1033,7 +1034,7 @@ function premoveTargets(type, from, color) {
   const out = [], f0 = fileOf(from), r0 = rankOf(from);
   const add = (f, r) => { if (onBoard(f, r)) out.push(sq(f, r)); };
   const rays = (dirs) => { for (const [df, dr] of dirs) for (let k = 1; k < 8; k++) add(f0 + df * k, r0 + dr * k); };
-  if (type === 'N') for (const [df, dr] of KNIGHT) add(f0 + df, r0 + dr);
+  if (type === 'N' || type === 'S') for (const [df, dr] of KNIGHT) add(f0 + df, r0 + dr);
   if (type === 'K') for (const [df, dr] of KING) add(f0 + df, r0 + dr);
   if (type === 'R' || type === 'Q' || type === 'S') rays(ROOK);
   if (type === 'B' || type === 'Q' || type === 'S') rays(BISHOP);
