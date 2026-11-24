@@ -47,7 +47,7 @@ const objectiveById = (id) => OBJECTIVES.find((o) => o.id === id);
 // ---------------------------------------------------------------- setup
 
 function newGame(twists = {}, rng = Math.random) {
-  const t = { hiddenQueen: false, traitor: false, objective: false, swap: false, mines: false, prophecy: false, shifter: false, ...twists };
+  const t = { hiddenQueen: false, traitor: false, objective: false, swap: false, mines: false, prophecy: false, shifter: false, gambler: false, ...twists };
   const s = {
     board: Array(64).fill(null), turn: W, twists: t, ep: null, nextId: 1,
     captured: { w: [], b: [] }, stats: { w: { promotions: 0 }, b: { promotions: 0 } },
@@ -56,6 +56,7 @@ function newGame(twists = {}, rng = Math.random) {
     result: null, lastMove: null, ply: 0, halfmove: 0, positions: {}, check: null,
     mines: { w: [], b: [] }, lastExplosion: null, shifter: { w: null, b: null },
     prophecy: { w: null, b: null }, bonusPending: null, bonusNow: null, turns: { w: 0, b: 0 },
+    coins: { w: 0, b: 0 }, lastSpin: null,
   };
   const back = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
   for (const c of [W, B]) {
@@ -330,6 +331,7 @@ function hasAnyMove(s, c) {
     any = !!f && legalMoves(s, f.sq, { traitor: true }).length > 0;
   }
   if (!any) any = canSwap(s, c);
+  if (!any && s.twists.gambler) any = Object.keys(PRICES).some((t) => s.coins[c] >= PRICES[t] && legalDrops(s, c, t).length > 0);
   s.turn = saved;
   return any;
 }
@@ -461,7 +463,7 @@ function afterTurn(s, entry) {
     if (s.check) end(s, mover, 'won by checkmate');
     else end(s, null, 'stalemate');
   }
-  if (!s.result && insufficientMaterial(s.board)) end(s, null, 'insufficient material');
+  if (!s.result && !s.twists.gambler && insufficientMaterial(s.board)) end(s, null, 'insufficient material');
   if (!s.result) {
     const key = positionKey(s);
     s.positions[key] = (s.positions[key] || 0) + 1;
@@ -485,6 +487,13 @@ function makeMove(s, move) {
   const legal = legalMoves(s, move.from, { traitor: !!move.traitor }).find((m) => m.to === move.to);
   if (!legal) throw new Error('Illegal move');
   recordStart(s);
+  let spin = null;
+  if (s.twists.gambler) {
+    spin = legal.capture ? spinFor(s, legal, move.roll) : null;
+    s.lastSpin = spin;
+    if (spin && !spin.won) return loseSpin(s, legal, spin);
+    s.coins[me] += 1 + (spin ? PIECE_VALUE[spin.defender] : 0);
+  }
   const takeBonus = s.bonusPending === me; // first half of a prophecy double move
   const isBonus = s.bonusNow === me; // second half
   s.bonusPending = null;
@@ -503,6 +512,7 @@ function makeMove(s, move) {
   const { text } = applyMove(s, legal, me, move.promo);
   if (legal.traitor) s.traitor[me].used = true;
   const entry = { color: me, text };
+  if (spin && spin.odds < 1) addNote(entry, `[wheel] won the spin at ${pct(spin.odds)}`);
   if (isBonus) addNote(entry, '[prophecy] bonus move');
   if (prophecyNote) addNote(entry, prophecyNote);
   s.history.push(entry);
@@ -525,6 +535,88 @@ function makeMove(s, move) {
       && legalMoves(s, guess.from).some((m) => m.to === guess.to)) {
     s.prophecy[me] = { from: guess.from, to: guess.to, state: 'active', readyOnTurn: s.turns[me] + PROPHECY_RECHARGE };
   }
+}
+
+// ---------------------------------------------------------------- Gambler's Gambit
+const PRICES = { P: 3, N: 8, B: 8, R: 12, Q: 20 };
+const LOST_SPIN_COINS = 2;
+const pct = (p) => `${Number((p * 100).toFixed(1))}%`;
+
+/** The attacker's chance to win a capture. The king is the only piece that always wins. */
+function spinOdds(attacker, defender) {
+  if (attacker === 'K') return 1;
+  const a = PIECE_VALUE[attacker], d = PIECE_VALUE[defender];
+  return a / (a + d);
+}
+function spinFor(s, m, roll) {
+  const attacker = s.board[m.from];
+  const capSq = m.ep ? m.to - 8 * fwd(attacker.owner) : m.to;
+  const defender = s.board[capSq];
+  const odds = spinOdds(attacker.type, defender.type);
+  const r = Number.isFinite(roll) && roll >= 0 && roll < 1 ? roll : Math.random();
+  return { color: attacker.owner, attacker: attacker.type, defender: defender.type, from: m.from, to: m.to, capSq, odds, roll: r, won: r < odds };
+}
+/** What a capture's spin will do, without playing it. Null if the move isn't a legal capture. */
+function previewSpin(s, move) {
+  const legal = legalMoves(s, move.from, { traitor: !!move.traitor }).find((m) => m.to === move.to);
+  return legal && legal.capture ? spinFor(s, legal, move.roll) : null;
+}
+/** The attacker loses: it's removed and the defender stays. If that exposes the king, the attacker's side moves again. */
+function loseSpin(s, m, spin) {
+  const me = s.turn, foe = other(me);
+  s.board[m.from] = null;
+  s.captured[foe].push({ type: spin.attacker, by: spin.defender, owner: me });
+  s.coins[foe] += PIECE_VALUE[spin.attacker];
+  s.coins[me] += LOST_SPIN_COINS;
+  s.ep = null;
+  s.halfmove = 0;
+  s.lastExplosion = null;
+  s.lastMove = { from: m.from, to: m.to };
+  const label = spin.attacker === 'P' ? FILES[fileOf(m.from)] : spin.attacker;
+  const text = `${label}x${sqName(m.to)} (lost)`;
+  const entry = { color: me, text };
+  addNote(entry, `[wheel] lost the spin at ${pct(spin.odds)}`);
+  s.history.push(entry);
+  const exposed = inCheck(s.board, me);
+  if (exposed) addNote(entry, 'king exposed: moves again');
+  s.turn = exposed ? me : foe;
+  s.turns[me]++;
+  s.ply++;
+  afterTurn(s, entry);
+  if (exposed) entry.text = text; // the check is on the player who just moved, so no + or # on their move
+}
+/** Empty squares in your half where a bought piece may go. It can block a check, but can't give one. */
+function legalDrops(s, c, type) {
+  if (!s.twists.gambler || s.result || !PRICES[type]) return [];
+  const out = [];
+  for (let i = 0; i < 64; i++) {
+    const r = rankOf(i);
+    if (s.board[i] || (c === W ? r > 3 : r < 4)) continue;
+    if (type === 'P' && r === homeRank(c)) continue;
+    const b = s.board.slice();
+    b[i] = { id: -1, owner: c, type, shown: type, moved: true };
+    if (!inCheck(b, c) && !inCheck(b, other(c))) out.push(i);
+  }
+  return out;
+}
+function buyPiece(s, type, at) {
+  const me = s.turn;
+  if (!s.twists.gambler || s.coins[me] < (PRICES[type] ?? Infinity)) throw new Error('Not enough coins');
+  if (!legalDrops(s, me, type).includes(at)) throw new Error('Illegal placement');
+  recordStart(s);
+  s.coins[me] -= PRICES[type];
+  s.board[at] = { id: s.nextId++, owner: me, type, shown: type, moved: true };
+  s.lastSpin = null;
+  s.lastExplosion = null;
+  s.ep = null;
+  s.halfmove++;
+  s.lastMove = { from: at, to: at };
+  const entry = { color: me, text: `${type}@${sqName(at)}`, note: `[coin] bought for ${PRICES[type]}` };
+  s.history.push(entry);
+  s.turn = other(me);
+  s.turns[me]++;
+  s.ply++;
+  afterTurn(s, entry);
 }
 
 /** Secret Swap: exchange the true identities of two of your pieces. Their looks stay the same. */
@@ -579,7 +671,7 @@ function canCheckmate(board, c) {
 }
 /** `c` ran out of time: they lose, unless the opponent couldn't checkmate anyway (then it's a draw). */
 function timeout(s, c) {
-  if (canCheckmate(s.board, other(c))) end(s, other(c), 'won on time');
+  if (s.twists.gambler || canCheckmate(s.board, other(c))) end(s, other(c), 'won on time'); // the shop can always buy more material
   else end(s, null, 'timeout vs insufficient material');
 }
 function agreeDraw(s) { end(s, null, 'agreement'); }
@@ -587,6 +679,6 @@ function agreeDraw(s) { end(s, null, 'agreement'); }
 globalThis.TGEngine = {
   W, B, other, FILES, sq, fileOf, rankOf, sqName, PIECE_NAME, PIECE_VALUE, PROMOTIONS, OBJECTIVES, objectiveById,
   newGame, prophecyReady, prophecyWait, PROPHECY_RECHARGE, setHiddenQueen, setTraitor, toggleMine, setMines, setShifter, MINES, findById, legalMoves, hasAnyMove, canSwap, inCheck, kingSq, makeMove, doSwap,
-  premoveTargets, resign, agreeDraw, timeout, canCheckmate, positionKey, insufficientMaterial,
+  PRICES, spinOdds, previewSpin, legalDrops, buyPiece, premoveTargets, resign, agreeDraw, timeout, canCheckmate, positionKey, insufficientMaterial,
 };
 })();

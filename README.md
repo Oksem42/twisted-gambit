@@ -13,6 +13,7 @@ Chess with secrets. Pick a game mode, then play a friend on the same device (pas
 | **Landmine** | Each player secretly plants 2 mines in the opponent's half. Any enemy piece except the king that lands on one is blown up. (If the blast would expose that piece's own king, the mine fizzles instead.) |
 | **Prophecy** | After your move, secretly predict your opponent's reply. If they play exactly that, your next turn is a double move (lost if the first move gives check). Recharges 5 turns after each use. |
 | **Shapeshifter** | Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look until it moves in a way that look couldn't, or gives check. |
+| **Gambler's Gambit** | Every capture spins a wheel, with odds based on piece value. The winner takes the other piece, and only the king always wins. Earn coins and spend your turn buying new pieces in the shop. If a lost spin exposes your king, you move again. |
 
 ## Base rules
 

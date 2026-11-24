@@ -27,6 +27,8 @@ const MODES = [
     desc: "After your move, secretly predict your opponent's reply. If they play exactly that, you get a double move. Recharges 5 turns after each use." },
   { key: 'shifter', name: 'Shapeshifter', icon: I.shifter,
     desc: 'Secretly pick one of your pieces. Each time it captures, it becomes the piece it captured, but keeps its old look.' },
+  { key: 'gambler', name: "Gambler's Gambit", icon: I.wheel,
+    desc: 'Every capture spins a wheel, and better pieces get bigger slices. Whoever it lands on takes the other. Only the king always wins. Earn coins and buy new pieces in the shop.' },
 ];
 const modeInfo = (k) => MODES.find((m) => m.key === k) || MODES[0];
 
@@ -63,7 +65,7 @@ function sound(kind) {
   if (!ui.sound) return;
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]], boom: [[160, 40, 0], [110, 30, 0.05], [70, 25, 0.1]], check: [[660, 660, 0], [880, 880, 0.08]] }[kind];
+    const tones = { move: [[330, 140, 0]], capture: [[240, 80, 0], [180, 70, 0.05]], end: [[523, 523, 0], [659, 659, 0.12], [784, 784, 0.24]], reveal: [[440, 880, 0]], boom: [[160, 40, 0], [110, 30, 0.05], [70, 25, 0.1]], check: [[660, 660, 0], [880, 880, 0.08]], spin: [[520, 700, 0], [620, 820, 0.09], [720, 940, 0.18]] }[kind];
     for (const [f0, f1, delay] of tones) {
       const t = actx.currentTime + delay;
       const o = actx.createOscillator(), g = actx.createGain();
@@ -333,6 +335,7 @@ function beginOnline(mode, g, names) {
   ui.bot = null;
   ui.lobbyOpen = false;
   closeModal();
+  cancelSpin();
   overlay.classList.add('hidden');
   ui.gameMode = mode;
   ui.names = names;
@@ -362,6 +365,7 @@ function checkReady() {
 }
 
 function applyRemote(a) {
+  if (ui.spinning) { ui.netQueue.push(a); return; } // wait until the wheel on screen has finished
   if (ui.predict && a.kind !== 'drawOffer') { G = ui.predict.realG; ui.predict = null; ui.tool = null; } // drop an unfinished prophecy
   try {
     switch (a.kind) {
@@ -371,14 +375,21 @@ function applyRemote(a) {
       case 'setShifter': E.setShifter(G, a.color, a.sq); break;
       case 'ready': ui.ready[a.color] = true; return checkReady();
       case 'move': {
-        const before = capturesNow();
         if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
-        E.makeMove(G, a.move);
-        sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
-        ui.fresh = null;
-        ui.anim = slidesFor(a.move);
-        return afterAction();
+        const go = () => {
+          const before = capturesNow();
+          try { E.makeMove(G, a.move); } catch (e) { ui.flash = `Sync problem: ${e.message}`; return render(); }
+          sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
+          ui.fresh = null;
+          ui.anim = slidesFor(a.move);
+          afterAction();
+        };
+        const spin = G.twists.gambler ? E.previewSpin(G, a.move) : null;
+        return spin && spin.odds < 1 ? showSpin(spin, go) : go();
       }
+      case 'buy':
+        if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
+        E.buyPiece(G, a.piece, a.sq); sound('reveal'); ui.fresh = a.sq; return afterAction();
       case 'swap':
         if (a.t != null) ui.clock[G.turn] = Math.min(TIME_CONTROL, a.t);
         E.doSwap(G, a.a, a.b); sound('reveal'); return afterAction();
@@ -434,6 +445,8 @@ function pickSets() {
   } else if (step === 'shifter') {
     each((p, i) => { if (p.owner === c && p.type !== 'K') pickable.add(i); });
     const f = E.findById(G, G.shifter[c]); if (f) picked.add(f.sq);
+  } else if (ui.tool === 'buy') {
+    E.legalDrops(G, c, ui.buyType).forEach((i) => pickable.add(i));
   } else if (ui.predict) {
     const g = ui.predict.guess;
     if (g) { picked.add(g.from); picked.add(g.to); }
@@ -508,6 +521,7 @@ function publicChips(c) {
     const id = G.shifter[c];
     return `<span class="chip ${id != null && !E.findById(G, id) ? 'spent' : ''}" title="Shapeshifter">${I.shifter} shapeshifter</span>`;
   }
+  if (t.gambler) return `<span class="chip coin-chip" title="Coins">${I.coin} ${G.coins[c]}</span>`;
   return '';
 }
 
@@ -553,6 +567,7 @@ function renderPromo() {
 // is drawn back at its old square and glides to the new one.
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 function slidesFor(move) {
+  if (G.lastSpin && !G.lastSpin.won) return []; // the attacker lost its spin, so nothing travels
   const out = [{ from: move.from, to: move.to }];
   const p = G.board[move.to];
   if (p && p.type === 'K' && Math.abs(E.fileOf(move.to) - E.fileOf(move.from)) === 2) { // castling: the rook moves too
@@ -690,6 +705,19 @@ function drawOfferCard() {
     <div class="btn-row"><button class="btn primary" data-act="draw-accept">Accept</button><button class="btn" data-act="draw-decline">Decline</button></div></div>`;
 }
 
+function shopCard() {
+  if (!G.twists.gambler) return '';
+  const c = ui.viewer, myTurn = canAct();
+  const items = Object.entries(E.PRICES).map(([t, price]) => {
+    const can = myTurn && G.coins[c] >= price && E.legalDrops(G, c, t).length > 0;
+    return `<button class="shop-item ${ui.tool === 'buy' && ui.buyType === t ? 'on' : ''}" data-act="buy" data-piece="${t}" ${can ? '' : 'disabled'} title="Buy a ${PIECE_NAME[t]}">
+      ${pieceSVG(t, c)}<span class="shop-name">${PIECE_NAME[t]}</span><span class="shop-price">${I.coin}${price}</span></button>`;
+  }).join('');
+  return `<div class="card shop"><div class="shop-head"><h3>${I.shop} Shop</h3><span class="shop-bal">${I.coin} ${G.coins[c]}</span></div>
+    <div class="shop-grid">${items}</div>
+    <p class="shop-help">Buying uses your turn. Place it on an empty square in your half. It can block a check, but can't give one.</p></div>`;
+}
+
 function predictCard() {
   const g = ui.predict.guess;
   return `<div class="card alert"><h3>${I.prophecy} Predict their reply</h3>
@@ -701,6 +729,7 @@ function predictCard() {
 
 function playCard() {
   if (ui.predict) return predictCard();
+  if (ui.spinning) return `<div class="card"><h3><span class="spinner"></span>Spinning the wheel…</h3><p>The clock is paused until it lands.</p></div>`;
   const c = G.turn;
   if (G.turn !== ui.viewer) {
     const msg = ui.bot ? `${nm(c)} is thinking…` : ui.online ? `Waiting for ${nm(c)} to move…` : `Pass the device to ${nm(c)}.`;
@@ -713,8 +742,14 @@ function playCard() {
   let hint = G.check === c ? '<b class="check-txt">Check!</b> You must get your king out of check.' : 'Click or drag a piece to move. Checkmate the king to win.';
   if (G.bonusNow === c) hint = `${I.prophecy} <b>Bonus move!</b> Your prophecy came true. Make your second move.`;
   else if (G.bonusPending === c) hint = `${I.prophecy} <b>Your prophecy came true!</b> You get two moves this turn, unless your first move gives check.${G.check === c ? ' <b class="check-txt">You are in check.</b>' : ''}`;
+  if (G.twists.gambler && G.lastSpin && !G.lastSpin.won && G.lastSpin.color === c && G.check === c) {
+    hint = `${I.wheel} <b class="check-txt">You lost the spin and your king is exposed.</b> Move again to get out of check.`;
+  }
   let actions = '';
-  if (ui.tool === 'prophecy') {
+  if (ui.tool === 'buy') {
+    hint = `${I.shop} Click a highlighted square to place your ${PIECE_NAME[ui.buyType]}.`;
+    actions = '<button class="btn" data-act="cancel">Cancel</button>';
+  } else if (ui.tool === 'prophecy') {
     hint = `${I.prophecy} Make your move as normal. Then you'll predict your opponent's reply.`;
     actions = '<button class="btn" data-act="cancel">Cancel</button>';
   } else if (ui.tool === 'traitor') {
@@ -761,7 +796,7 @@ function moveText(e) {
   return iconize(esc(e.text).replace(/^(\[traitor\] )?([KQRBN])/, (_, tr, l) => `${tr || ''}${pieceSVG(l, 'w').replace('class="piece-svg"', 'class="piece-svg fig"')}`));
 }
 /** The engine writes [traitor], [boom] etc. in the move history; show them as icons. */
-const iconize = (text) => text.replace(/\[(traitor|boom|swap|prophecy)\]/g, (_, k) => I[k]);
+const iconize = (text) => text.replace(/\[(traitor|boom|swap|prophecy|wheel|coin)\]/g, (_, k) => I[k]);
 
 function movesHTML() {
   const h = G.history;
@@ -800,7 +835,7 @@ function renderPanel() {
   } else if (ui.phase === 'play') {
     const showSecrets = ui.online || ui.bot || G.turn === ui.viewer;
     const items = showSecrets ? secretItems(ui.viewer) : '';
-    body = connectionCard() + drawOfferCard() + playCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
+    body = connectionCard() + drawOfferCard() + playCard() + shopCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else {
     body = connectionCard() + overCard();
   }
@@ -910,6 +945,7 @@ function runSetup() {
 
 function startLocalGame(mode) {
   netTeardown();
+  cancelSpin();
   ui.bot = null;
   ui.gameMode = mode;
   store.set('mode', mode);
@@ -926,6 +962,7 @@ function startLocalGame(mode) {
 // ---------------------------------------------------------------- bot games
 function startBotGame(mode, id = 'v1') {
   netTeardown();
+  cancelSpin();
   ui.gameMode = mode;
   store.set('mode', mode);
   G = E.newGame({ [mode]: true });
@@ -967,17 +1004,23 @@ function botPlay(game, action) {
   if (G !== game || !ui.bot || ui.phase !== 'play' || G.result || G.turn !== ui.bot.color) return;
   action = action || Bot.chooseAction(G);
   if (!action) return;
-  const before = capturesNow();
-  try {
-    if (action.type === 'swap') { E.doSwap(G, action.a, action.b); sound('reveal'); ui.anim = null; }
-    else {
-      E.makeMove(G, action.move);
-      sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
-      ui.anim = slidesFor(action.move);
-    }
-  } catch { return; }
-  ui.fresh = null;
-  afterAction();
+  const move = action.type === 'move' && G.twists.gambler ? { ...action.move, roll: Math.random() } : action.move;
+  const go = () => {
+    const before = capturesNow();
+    try {
+      if (action.type === 'swap') { E.doSwap(G, action.a, action.b); sound('reveal'); ui.anim = null; }
+      else if (action.type === 'buy') { E.buyPiece(G, action.piece, action.sq); sound('reveal'); ui.anim = null; }
+      else {
+        E.makeMove(G, move);
+        sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : capturesNow() > before ? 'capture' : 'move');
+        ui.anim = slidesFor(move);
+      }
+    } catch { return; }
+    ui.fresh = action.type === 'buy' ? action.sq : null;
+    afterAction();
+  };
+  const spin = action.type === 'move' && G.twists.gambler ? E.previewSpin(G, move) : null;
+  return spin && spin.odds < 1 ? showSpin(spin, go) : go();
 }
 
 function botTurn() {
@@ -1049,11 +1092,22 @@ function doMove(m, dropped = false) {
     }
     ui.tool = null;
   }
+  if (G.twists.gambler && m.roll == null) m = { ...m, roll: Math.random() };
+  tick();
+  const act = { kind: 'move', t: Math.round(ui.clock[ui.viewer]), move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined, prophecy: m.prophecy || undefined, roll: m.roll } };
+  const spin = G.twists.gambler ? E.previewSpin(G, m) : null;
+  if (spin && spin.odds < 1) { // both players watch the same wheel before the result is applied
+    sendAct(act);
+    return showSpin(spin, () => commitMove(m, false, null));
+  }
+  commitMove(m, dropped, act);
+}
+
+function commitMove(m, dropped, act) {
   const before = capturesNow();
   const revealedBefore = G.board.filter((p) => p && p.shown === p.type).length;
   try { E.makeMove(G, m); } catch (e) { ui.flash = e.message; return render(); }
-  tick();
-  sendAct({ kind: 'move', t: Math.round(ui.clock[ui.viewer]), move: { from: m.from, to: m.to, traitor: !!m.traitor, promo: typeof m.promo === 'string' ? m.promo : undefined, prophecy: m.prophecy || undefined } });
+  if (act) sendAct(act);
   const revealed = G.board.filter((p) => p && p.shown === p.type).length > revealedBefore;
   sound(G.lastExplosion != null ? 'boom' : G.check ? 'check' : revealed ? 'reveal' : capturesNow() > before ? 'capture' : 'move');
   ui.fresh = dropped ? m.to : null;
@@ -1062,13 +1116,83 @@ function doMove(m, dropped = false) {
   afterAction();
 }
 
+// ---------------------------------------------------------------- Gambler's Gambit: wheel and shop
+const SPIN_MS = 1500, SPIN_HOLD = 600;
+let spinTimer = null;
+const spinPct = (p) => `${Number((p * 100).toFixed(1))}%`;
+
+function cancelSpin() {
+  clearTimeout(spinTimer);
+  ui.spinning = false;
+  ui.netQueue = [];
+  const el = $('spin');
+  el.classList.add('hidden');
+  el.innerHTML = '';
+}
+
+/** Spin the wheel, then run `done`. The roll was decided already, so both players see the same landing spot. */
+function showSpin(spin, done) {
+  const game = G, el = $('spin');
+  const atk = spin.color, def = other(atk), deg = spin.odds * 360;
+  const fill = { w: '#ebecd0', b: '#4b4847' };
+  const label = (type, color, mid) => {
+    const rad = (mid - 90) * Math.PI / 180;
+    return `<span class="wheel-pc" style="left:${50 + 31 * Math.cos(rad)}%;top:${50 + 31 * Math.sin(rad)}%">${pieceSVG(type, color)}</span>`;
+  };
+  stopClock();
+  ui.spinning = true;
+  ui.selected = null; ui.moves = []; ui.tool = null;
+  render();
+  el.innerHTML = `<div class="spin-card" role="status">
+    <div class="spin-title">${PIECE_NAME[spin.attacker]} attacks ${PIECE_NAME[spin.defender]}</div>
+    <div class="wheel-wrap"><span class="wheel-pointer"></span>
+      <div class="wheel" style="background:conic-gradient(${fill[atk]} 0 ${deg}deg, ${fill[def]} ${deg}deg 360deg)">
+        ${label(spin.attacker, atk, deg / 2)}${label(spin.defender, def, deg + (360 - deg) / 2)}
+      </div><span class="wheel-hub"></span></div>
+    <div class="spin-odds"><span>${pieceSVG(spin.attacker, atk)}<b>${spinPct(spin.odds)}</b></span><i>vs</i><span><b>${spinPct(1 - spin.odds)}</b>${pieceSVG(spin.defender, def)}</span></div>
+    <div class="spin-result">Spinning…</div></div>`;
+  el.classList.remove('hidden');
+  sound('spin');
+  const wheel = el.querySelector('.wheel');
+  const end = 360 * 5 - spin.roll * 360;
+  const quick = reduceMotion();
+  if (wheel.animate) wheel.animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${end}deg)` }], { duration: quick ? 1 : SPIN_MS, easing: 'cubic-bezier(.12,.72,.16,1)', fill: 'forwards' });
+  else wheel.style.transform = `rotate(${end}deg)`;
+  spinTimer = setTimeout(() => {
+    if (G !== game) return;
+    const winner = spin.won ? spin.attacker : spin.defender, winColor = spin.won ? atk : def;
+    const res = el.querySelector('.spin-result');
+    res.textContent = `${COLOR[winColor]}'s ${PIECE_NAME[winner]} wins!`;
+    res.classList.add('done');
+    spinTimer = setTimeout(() => {
+      if (G !== game) return;
+      ui.spinning = false;
+      el.classList.add('hidden');
+      el.innerHTML = '';
+      if (!G.result) done();
+      const queued = ui.netQueue.splice(0);
+      queued.forEach(applyRemote);
+    }, SPIN_HOLD);
+  }, quick ? 150 : SPIN_MS);
+}
+
+function doBuy(type, at) {
+  tick();
+  try { E.buyPiece(G, type, at); } catch (e) { ui.flash = e.message; return render(); }
+  sendAct({ kind: 'buy', piece: type, sq: at, t: Math.round(ui.clock[ui.viewer]) });
+  sound('reveal');
+  ui.fresh = at;
+  ui.flash = '';
+  afterAction();
+}
+
 function canAct() {
-  return ui.phase === 'play' && !G.result && G.turn === ui.viewer && !ui.premoves.length && overlay.classList.contains('hidden');
+  return !ui.spinning && ui.phase === 'play' && !G.result && G.turn === ui.viewer && !ui.premoves.length && overlay.classList.contains('hidden');
 }
 
 // ---------------------------------------------------------------- premoves (online and bot games)
 let preTimer = null;
-const canPremove = () => (ui.online || !!ui.bot) && ui.phase === 'play' && !G.result && G.turn !== ui.viewer
+const canPremove = () => !ui.spinning && (ui.online || !!ui.bot) && ui.phase === 'play' && !G.result && G.turn !== ui.viewer
   && !ui.predict && overlay.classList.contains('hidden');
 
 /** The board as it will look once the queued premoves are played. */
@@ -1198,6 +1322,10 @@ boardEl.addEventListener('pointerdown', (e) => {
   if (canPremove()) return onPremoveDown(i, e);
   if (!canAct()) return;
   if (ui.tool === 'swap') return onSwapClick(i);
+  if (ui.tool === 'buy') {
+    if (E.legalDrops(G, ui.viewer, ui.buyType).includes(i)) doBuy(ui.buyType, i);
+    return;
+  }
   if (ui.selected != null) {
     const m = ui.moves.find((x) => x.to === i);
     if (m) return doMove(m);
@@ -1260,7 +1388,12 @@ panel.addEventListener('click', (e) => {
   if (!btn || btn.disabled) return;
   const act = btn.dataset.act;
   const c = ui.viewer;
+  if (ui.spinning && !['new', 'rules', 'flip'].includes(act)) return;
   switch (act) {
+    case 'buy':
+      if (!canAct()) return;
+      ui.tool = 'buy'; ui.buyType = btn.dataset.piece; ui.selected = null; ui.moves = [];
+      return render();
     case 'new': return openNewGame();
     case 'rules': return openRules();
     case 'flip': ui.flipped = !ui.flipped; return render();
@@ -1505,6 +1638,8 @@ function openRules() {
         <li><b>Landmine:</b> mines can go on any square in the opponent's half. A mine is used up when it goes off. If blowing up a piece would leave its own king in check, the mine fizzles instead and the piece survives.</li>
         <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check. After using it, it recharges for 5 of your turns.</li>
         <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
+        <li><b>Gambler's Gambit:</b> your chance to win a capture is your piece's value divided by both pieces' values (pawn 1, knight 3, bishop 3, rook 5, queen 9). If you win, you capture normally. If you lose, your attacker is removed and the defender stays. Only a king always wins. If losing a spin leaves your king in check, you move again right away, and if you can't escape it's checkmate.</li>
+        <li><b>Coins and shop:</b> earn 1 coin per move, plus the defeated piece's value when you win a spin, and 2 coins when your attacker loses one. Pawn 3, knight 8, bishop 8, rook 12, queen 20. Buying uses your turn. Bought pieces go on an empty square in your half (pawns not on your back rank), can block a check, and can't give check when placed.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Clock:</b> each player has 10 minutes for the whole game, counting down on their turn. Run out and you lose, unless your opponent only has a king (or a king and one bishop or knight), which is a draw.</li>
         <li><b>Premoves:</b> in online and bot games, move during your opponent's turn to queue one or more moves, shown in red. Each plays instantly on your turn if it's legal; if one isn't, the whole queue is cancelled. Pawns auto-promote to a queen. Right-click, or click an empty square, to cancel.</li>

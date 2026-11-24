@@ -425,6 +425,124 @@ function rootSearch(S, rootMoves, ms) {
   return { move: best, score: bestScore, depth: depthDone };
 }
 
+// ---------------------------------------------------------------- Gambler's Gambit: expectimax over the spins
+const SPIN_VAL = [0, 1, 3, 3, 5, 9, 0];
+const COIN_CP = 30; // what one coin is worth to Jules, in centipawns
+const spinP = (a, d) => (a === 6 ? 1 : SPIN_VAL[a] / (SPIN_VAL[a] + SPIN_VAL[d]));
+
+/** The attacker loses its spin: it disappears, and its side moves again if that exposed the king. */
+function makeLose(S, m, us) {
+  const from = mFrom(m);
+  const u = { ch: [from, S.b[from]], castle: S.castle, ep: S.ep, side: S.side, shift: S.shift, kW: S.kW, kB: S.kB, cap: 0, botCap: 0, boom: 0, mine: -1, promos: S.promos, qp: S.qp };
+  S.b[from] = 0;
+  if (from === 0) S.castle &= ~2;
+  if (from === 7) S.castle &= ~1;
+  if (from === 56) S.castle &= ~8;
+  if (from === 63) S.castle &= ~4;
+  S.ep = -1;
+  S.side = inCheck(S, us) ? us : -us;
+  return u;
+}
+
+/** Leaf score: the position plus half of the best capture gamble available. */
+function gambleLeaf(S) {
+  const stand = evaluate(S), caps = [];
+  gen(S, caps, true);
+  let bestEv = 0;
+  for (const m of caps) {
+    const a = Math.abs(S.b[mFrom(m)]), d = Math.abs(S.b[mTo(m)]);
+    if (!d || d === 6) continue;
+    const p = spinP(a, d), ev = p * VAL[d] - (a === 6 ? 0 : (1 - p) * VAL[a]);
+    if (ev > bestEv) bestEv = ev;
+  }
+  return stand + bestEv / 2;
+}
+
+/** The value of move `m` for the side to move, or null if it's illegal. Captures average both spin outcomes. */
+function gambleMove(S, m, depth, alpha, beta, ply) {
+  const us = S.side, from = mFrom(m), to = mTo(m);
+  const capSq = (mFlag(m) & 1) ? to - 8 * us : to;
+  const a = Math.abs(S.b[from]), d = Math.abs(S.b[capSq]);
+  if (d === 6) return null; // kings are never captured
+  const u = play(S, m);
+  if (!u) return null;
+  if (!d || a === 6) {
+    const sc = -gambleSearch(S, depth - 1, -beta, -alpha, ply + 1);
+    unmake(S, u);
+    return sc + COIN_CP * (1 + SPIN_VAL[d]);
+  }
+  const win = -gambleSearch(S, depth - 1, -INF, INF, ply + 1);
+  unmake(S, u);
+  const ul = makeLose(S, m, us);
+  const sign = S.side === us ? 1 : -1;
+  const lose = sign * gambleSearch(S, depth - 1, -INF, INF, ply + 1);
+  unmake(S, ul);
+  const p = spinP(a, d);
+  return p * (win + COIN_CP * (1 + SPIN_VAL[d])) + (1 - p) * (lose + COIN_CP * 2);
+}
+
+function gambleSearch(S, depth, alpha, beta, ply) {
+  if ((++nodes & 1023) === 0 && Date.now() > deadline) throw STOP;
+  const check = inCheck(S, S.side);
+  if (ply > 24) return evaluate(S);
+  if (depth <= 0) { if (!check) return gambleLeaf(S); depth = 1; }
+  const moves = [];
+  gen(S, moves, false);
+  orderMoves(S, moves, 0, ply);
+  let best = -INF, legal = 0;
+  for (const m of moves) {
+    const sc = gambleMove(S, m, depth, alpha, beta, ply);
+    if (sc === null) continue;
+    legal++;
+    if (sc > best) best = sc;
+    if (sc > alpha) alpha = sc;
+    if (alpha >= beta) break;
+  }
+  return legal ? best : (check ? -(MATE - ply) : 0);
+}
+
+function gambleChoose(G, ms) {
+  const botColor = G.turn, us = colorOf(botColor), keys = legalKeys(G), all = [];
+  gen(fromGame(G, botColor), all, false);
+  const moves = all.filter((m) => keys.has(m & 4095) && (!mPromo(m) || mPromo(m) === 5 || mPromo(m) === 2));
+  const buys = [];
+  for (const piece of Object.keys(E.PRICES)) {
+    if (G.coins[botColor] < E.PRICES[piece]) continue;
+    const t = TYPE[piece];
+    const spots = E.legalDrops(G, botColor, piece).sort((a, b) => PST[t][tbl(b, us)] - PST[t][tbl(a, us)]).slice(0, 6);
+    for (const sq of spots) buys.push({ piece, sq, t });
+  }
+  if (!moves.length && !buys.length) return null;
+  deadline = Date.now() + ms;
+  nodes = 0;
+  killers.length = 0;
+  hist.fill(0);
+  let best = moves.length ? { type: 'move', move: toGameMove(moves[0]) } : { type: 'buy', piece: buys[0].piece, sq: buys[0].sq };
+  try {
+    for (let depth = 1; depth <= 12; depth++) {
+      const started = Date.now();
+      const S = fromGame(G, botColor);
+      let alpha = -INF, top = null;
+      for (const m of moves) {
+        const sc = gambleMove(S, m, depth, alpha, INF, 0);
+        if (sc !== null && sc > alpha) { alpha = sc; top = { type: 'move', move: toGameMove(m) }; }
+      }
+      for (const b of buys) {
+        S.b[b.sq] = b.t * us;
+        const ep = S.ep;
+        S.ep = -1; S.side = -us;
+        const sc = -gambleSearch(S, depth - 1, -INF, INF, 1) - COIN_CP * (E.PRICES[b.piece] + 1);
+        S.b[b.sq] = 0; S.side = us; S.ep = ep;
+        if (sc > alpha) { alpha = sc; top = { type: 'buy', piece: b.piece, sq: b.sq }; }
+      }
+      if (top) best = top;
+      if (Math.abs(alpha) > MATE - 500) break;
+      if (Date.now() + (Date.now() - started) * 3 > deadline) break; // the next depth wouldn't finish
+    }
+  } catch (e) { if (e !== STOP) throw e; }
+  return best;
+}
+
 // ---------------------------------------------------------------- bridge to the game
 const colorOf = (c) => (c === E.W ? 1 : -1);
 
@@ -480,6 +598,7 @@ function scoreAction(G, botColor, apply, depth) {
 
 function chooseAction(G, opts = {}) {
   const botColor = G.turn, ms = Math.max(150, opts.ms || 1500);
+  if (G.twists.gambler) return gambleChoose(G, ms);
   const S = fromGame(G, botColor);
   const keys = legalKeys(G);
   const all = [];

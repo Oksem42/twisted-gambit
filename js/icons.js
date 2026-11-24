@@ -24,6 +24,9 @@ const PATHS = {
   clock: '<circle cx="12" cy="13" r="8"/><path d="M12 8.5V13l3 2"/>',
   boom: '<path d="M12 2.5l1.8 5.4 5.2-2.6-2.6 5.2 5.4 1.8-5.4 1.8 2.6 5.2-5.2-2.6L12 21.5l-1.8-5.4-5.2 2.6 2.6-5.2L2.5 12l5.4-1.8L5.3 5.3l5.2 2.6z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  wheel: '<circle cx="12" cy="13" r="8.5"/><circle cx="12" cy="13" r="1.6"/><path d="M12 4.5v6.9M12 14.6v6.9M3.5 13h6.9M13.6 13h6.9M6 7l4.9 4.9M13.1 14.1 18 19M18 7l-4.9 4.9M10.9 14.1 6 19"/><path d="M10 1.5h4L12 5z" fill="currentColor"/>',
+  coin: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="6"/><path d="M12 9v6"/>',
+  shop: '<path d="M4 10v10h16V10"/><path d="M3 10l2-6h14l2 6a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M10 20v-5h4v5"/>',
 };
 const I = {};
 for (const [name, d] of Object.entries(PATHS)) {

@@ -350,6 +350,71 @@ test('timeout is a draw if the opponent cannot checkmate', () => {
   eq(s.result.winner, null); eq(s.result.reason, 'timeout vs insufficient material');
 });
 
+// ------------------------------------------------ Gambler's Gambit
+const GG = { gambler: true };
+test('spin odds follow piece value, and only the king is certain', () => {
+  eq(E.spinOdds('P', 'Q'), 0.1); eq(E.spinOdds('Q', 'P'), 0.9); eq(E.spinOdds('N', 'R'), 0.375);
+  eq(E.spinOdds('R', 'R'), 0.5); eq(E.spinOdds('K', 'Q'), 1);
+  for (const a of 'PNBRQ') for (const d of 'PNBRQ') ok(E.spinOdds(a, d) < 1, `${a} vs ${d}`);
+});
+test('winning a spin captures and pays the piece value', () => {
+  const s = position({ e1: 'wK', e8: 'bK', a1: 'wR', a7: 'bN' }, 'w', GG);
+  mv(s, 'a1', 'a7', { roll: 0.1 });
+  eq(s.board[S('a7')].owner, 'w'); eq(s.coins.w, 4); eq(s.turn, 'b'); eq(s.lastSpin.won, true);
+});
+test('losing a spin removes the attacker and keeps the defender', () => {
+  const s = position({ e1: 'wK', e8: 'bK', a1: 'wR', a7: 'bN' }, 'w', GG);
+  mv(s, 'a1', 'a7', { roll: 0.99 });
+  eq(s.board[S('a1')], null); eq(s.board[S('a7')].type, 'N'); eq(s.board[S('a7')].owner, 'b');
+  eq(s.coins.w, 2); eq(s.coins.b, 5); eq(s.turn, 'b');
+});
+test('a king capture always wins, even on the highest roll', () => {
+  const s = position({ e1: 'wK', e8: 'bK', e2: 'bQ' }, 'w', GG);
+  mv(s, 'e1', 'e2', { roll: 0.999 });
+  eq(s.board[S('e2')].type, 'K'); eq(s.coins.w, 10);
+});
+test('losing en passant removes only the attacker', () => {
+  const s = position({ e1: 'wK', e8: 'bK', e5: 'wP', d7: 'bP' }, 'b', GG);
+  mv(s, 'd7', 'd5');
+  mv(s, 'e5', 'd6', { roll: 0.9 });
+  eq(s.board[S('e5')], null); eq(s.board[S('d5')].type, 'P'); eq(s.board[S('d6')], null);
+});
+test('a lost spin that exposes your king gives you another move', () => {
+  const s = position({ e1: 'wK', h8: 'bK', e2: 'wR', e8: 'bR' }, 'w', GG);
+  mv(s, 'e2', 'e8', { roll: 0.99 });
+  eq(s.turn, 'w'); eq(s.check, 'w'); eq(s.result, null);
+  ok(!s.history[0].text.includes('+'), 'no check mark on own move');
+  mv(s, 'e1', 'd1');
+  eq(s.turn, 'b');
+});
+test('a lost spin with no escape is checkmate', () => {
+  const s = position({ h1: 'wK', g2: 'wP', h2: 'wP', f6: 'wB', a1: 'bR', a8: 'bK' }, 'w', GG);
+  mv(s, 'f6', 'a1', { roll: 0.99 });
+  eq(s.result.winner, 'b'); eq(s.result.reason, 'won by checkmate');
+});
+test('shop: prices, placement limits and spending', () => {
+  const s = position({ e1: 'wK', e8: 'bK' }, 'w', GG);
+  ok(throws(() => E.buyPiece(s, 'Q', S('d3'))), 'no coins');
+  s.coins.w = 20;
+  ok(!E.legalDrops(s, 'w', 'P').includes(S('a1')), 'pawn on back rank');
+  ok(!E.legalDrops(s, 'w', 'Q').includes(S('a5')), 'enemy half');
+  ok(!E.legalDrops(s, 'w', 'R').includes(S('e4')), 'cannot give check');
+  E.buyPiece(s, 'Q', S('a3'));
+  eq(s.coins.w, 0); eq(s.board[S('a3')].type, 'Q'); eq(s.turn, 'b');
+});
+test('a bought piece can block check', () => {
+  const s = position({ a1: 'wK', a8: 'bR', b8: 'bR', h8: 'bK' }, 'w', GG);
+  s.coins.w = 3;
+  ok(E.hasAnyMove(s, 'w'), 'the shop is a way out');
+  ok(E.legalDrops(s, 'w', 'P').includes(S('a2')), 'block on a2');
+  ok(!E.legalDrops(s, 'w', 'P').includes(S('c2')), 'must answer check');
+});
+test('bare kings are not a draw, since the shop can add material', () => {
+  const s = position({ e1: 'wK', e8: 'bK' }, 'w', GG);
+  mv(s, 'e1', 'e2');
+  eq(s.result, null); eq(s.coins.w, 1);
+});
+
 globalThis.TGTestResults = results;
 
 // Node runner

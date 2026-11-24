@@ -38,6 +38,13 @@ function chooseAction(s, rng = Math.random) {
     const rest = mine.filter(([p]) => p.type !== a[0].type);
     if (rest.length) options.push({ type: 'swap', a: a[1], b: pick(rest, rng)[1] });
   }
+  if (s.twists.gambler) {
+    for (const piece of Object.keys(E.PRICES)) {
+      if (s.coins[me] < E.PRICES[piece]) continue;
+      const spots = E.legalDrops(s, me, piece);
+      if (spots.length) options.push({ type: 'buy', piece, sq: pick(spots, rng) });
+    }
+  }
   if (!options.length) return null;
   const choice = pick(options, rng);
   if (choice.type !== 'move') return choice;
