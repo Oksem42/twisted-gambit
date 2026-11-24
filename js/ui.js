@@ -1164,7 +1164,7 @@ function renderPanel() {
   } else if (ui.phase === 'play') {
     const showSecrets = ui.online || ui.bot || G.turn === ui.viewer;
     const items = showSecrets ? secretItems(ui.viewer) : '';
-    body = connectionCard() + drawOfferCard() + playCard() + powersCard() + shopCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
+    body = powersCard() + connectionCard() + drawOfferCard() + playCard() + shopCard() + (items ? `<div class="card"><h3>${I.lock} Your secrets</h3><ul class="secret-list">${items}</ul></div>` : '');
   } else {
     body = connectionCard() + overCard();
   }

@@ -558,3 +558,6 @@ a { color: inherit; }
 .fx-rewind .gi { width: 80%; height: 80%; stroke-width: 2.2; filter: drop-shadow(0 3px 6px #000c); }
 @keyframes fx-rewind { 0% { transform: rotate(0) scale(.4); opacity: 0; } 30% { opacity: 1; } 80% { transform: rotate(-720deg) scale(1); opacity: 1; } 100% { transform: rotate(-800deg) scale(1.15); opacity: 0; } }
 .mg-leave { margin-top: 10px; }
+
+/* The Powers card stays pinned to the top of the panel while the moves scroll under it */
+.card.powers { position: sticky; top: 0; z-index: 6; box-shadow: 0 0 0 12px var(--panel), 0 20px 14px -6px #000a; }
