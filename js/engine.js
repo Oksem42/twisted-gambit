@@ -519,10 +519,11 @@ function makeMove(s, move) {
     prophecyNote = hit ? `[prophecy] ${foe === W ? 'White' : 'Black'} predicted this move: bonus move next turn` : '[prophecy] a prophecy missed';
   }
 
-  const { text } = applyMove(s, legal, me, move.promo);
+  const played = (s.twists.powers && bananaIntercept(s, legal, me)) || legal; // running over a peel stops you on it
+  const { text } = applyMove(s, played, me, move.promo);
   if (legal.traitor) s.traitor[me].used = true;
   const entry = { color: me, text };
-  if (s.twists.powers) for (const n of landEffects(s, legal, me)) addNote(entry, n);
+  if (s.twists.powers) for (const n of landEffects(s, played, me)) addNote(entry, n);
   if (spin && spin.odds < 1) addNote(entry, `[wheel] won the spin at ${pct(spin.odds)}`);
   if (isBonus) addNote(entry, '[prophecy] bonus move');
   if (prophecyNote) addNote(entry, prophecyNote);
@@ -634,11 +635,11 @@ function buyPiece(s, type, at) {
 // ---------------------------------------------------------------- Power Chess
 const POWER_RECHARGE = 3;
 const POWERS = {
-  snake: { name: 'Snake', game: true, desc: 'Both players play Snake at the same time. Whoever survives longest gets a Snake piece, which moves like a king, a queen and a knight combined.' },
+  snake: { name: 'Snake', game: true, desc: 'Both players play Snake at the same time. The last snake standing (or, if both last 30 seconds, the one with the most apples) gets a Snake piece, which moves like a king, a queen and a knight combined.' },
   tug: { name: 'Tug of War', game: true, desc: 'Tap as fast as you can for 5 seconds. The winner gets a free push: move one enemy piece one square.' },
   asteroids: { name: 'Asteroid Dodge', game: true, desc: 'Dodge falling rocks. Whoever survives longest gets a double move on their next turn.' },
   rewind: { name: 'Time Rewind', desc: "Undo your last move and your opponent's reply. It's your turn again." },
-  banana: { name: 'Banana Peel', desc: 'Hide a peel on an empty square. An enemy piece (not the king) that stops on it keeps sliding until something blocks it.' },
+  banana: { name: 'Banana Peel', desc: 'Hide a peel on an empty square. An enemy piece (not a king) that stops on it or runs over it slips and slides on until something blocks it. Knights jump over it.' },
   portals: { name: 'Portals', desc: 'Place two linked portals for 5 turns. A piece (not a king) that stops on one comes out of the other.' },
   quake: { name: 'Earthquake', desc: 'Shake a row: its pieces slide one square left or right. Kings and walls stay put.' },
   piston: { name: 'Piston', desc: 'Shove any piece (not a king) one square. Pieces lined up behind it get shoved too.' },
@@ -969,6 +970,47 @@ function freePush(s, from, to) {
   if (!hasAnyMove(s, me)) end(s, null, 'stalemate'); // the push left you nothing to play
 }
 
+/** Which way a slipping piece slides: the way it was going (a knight slides along its long leg). */
+function slipDir(m) {
+  let df = fileOf(m.to) - fileOf(m.from), dr = rankOf(m.to) - rankOf(m.from);
+  if (df && dr && Math.abs(df) !== Math.abs(dr)) { if (Math.abs(df) > Math.abs(dr)) dr = 0; else df = 0; }
+  return [sign(df), sign(dr)];
+}
+/** Slide the piece on `at` one square at a time until something blocks it (or the next step would expose its king). */
+function slide(b, at, df, dr, me) {
+  for (;;) {
+    const f = fileOf(at) + df, r = rankOf(at) + dr;
+    if (!onBoard(f, r) || b[sq(f, r)]) return at;
+    const t = b.slice();
+    t[sq(f, r)] = t[at]; t[at] = null;
+    if (inCheck(t, me)) return at;
+    shiftPc(b, at, sq(f, r));
+    at = sq(f, r);
+  }
+}
+/**
+ * A piece that runs over an enemy peel on its way stops on the peel (and then slips on from there).
+ * Knights (and the Snake's knight jumps) leap over it; kings and castling never slip. If slipping would leave
+ * your own king in check, the peel doesn't catch you.
+ */
+function bananaIntercept(s, m, me) {
+  const p = s.board[m.from];
+  if (!p || p.type === 'K' || p.type === 'N' || m.castle || m.traitor) return null;
+  const df = fileOf(m.to) - fileOf(m.from), dr = rankOf(m.to) - rankOf(m.from);
+  if (df && dr && Math.abs(df) !== Math.abs(dr)) return null; // a jump, not a run
+  const n = Math.max(Math.abs(df), Math.abs(dr)), peels = s.bananas[other(me)];
+  for (let k = 1; k < n; k++) {
+    const i = sq(fileOf(m.from) + sign(df) * k, rankOf(m.from) + sign(dr) * k);
+    if (!peels.includes(i)) continue;
+    const b = s.board.slice();
+    b[i] = p; b[m.from] = null;
+    slide(b, i, sign(df), sign(dr), me);
+    if (inCheck(promoted(b), me)) return null;
+    return { from: m.from, to: i };
+  }
+  return null;
+}
+
 /** After a move lands: enemy banana peels make it slide, portals warp it. Kings are never affected. */
 function landEffects(s, m, me) {
   const notes = [];
@@ -977,17 +1019,12 @@ function landEffects(s, m, me) {
   if (!p || p.type === 'K') return notes;
   const safeTo = (to) => { const b = s.board.slice(); b[to] = p; b[at] = null; return !inCheck(b, me); };
   const peels = s.bananas[other(me)], k = peels.indexOf(at);
+  let slipped = false;
   if (k >= 0) {
     peels.splice(k, 1);
-    let df = fileOf(m.to) - fileOf(m.from), dr = rankOf(m.to) - rankOf(m.from);
-    if (df && dr && Math.abs(df) !== Math.abs(dr)) { if (Math.abs(df) > Math.abs(dr)) dr = 0; else df = 0; } // a knight slides along its long leg
-    df = sign(df); dr = sign(dr);
-    for (;;) {
-      const f = fileOf(at) + df, r = rankOf(at) + dr;
-      if (!onBoard(f, r) || s.board[sq(f, r)] || !safeTo(sq(f, r))) break;
-      shiftPc(s.board, at, sq(f, r));
-      at = sq(f, r);
-    }
+    slipped = true;
+    const [df, dr] = slipDir(m);
+    at = slide(s.board, at, df, dr, me);
     notes.push(at === m.to ? '[banana] slipped on a peel but was blocked' : `[banana] slipped to ${sqName(at)}`);
   }
   for (const c of [W, B]) {
@@ -997,9 +1034,9 @@ function landEffects(s, m, me) {
     if (!s.board[dest] && safeTo(dest)) { shiftPc(s.board, at, dest); at = dest; notes.push(`[portals] warped to ${sqName(at)}`); }
     break;
   }
-  if (at !== m.to) {
+  if (at !== m.to || slipped) {
     s.ep = null;
-    s.lastMove = { from: m.from, to: at };
+    s.lastMove = { from: m.from, to: at, via: m.to }; // via: where it hit the peel or portal
     if (p.type === 'P' && rankOf(at) === lastRank(p.owner)) { p.type = p.shown = 'Q'; s.stats[p.owner].promotions++; }
   }
   return notes;

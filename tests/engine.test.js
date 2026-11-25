@@ -481,6 +481,16 @@ test('banana peels make enemy pieces slide; portals warp them', () => {
   mv(s, 'a1', 'a3');
   eq(s.board[S('f6')].type, 'R');
 });
+test('running over a banana peel slips too; knights jump over it', () => {
+  let s = position({ e1: 'wK', h8: 'bK', a1: 'wR', a7: 'bP' }, 'b', PW);
+  withPower(s, 'b', 'banana'); E.usePower(s, 0, { at: S('a4') });
+  mv(s, 'a1', 'a7'); // heading for the pawn, but slips on a4 and stops next to it
+  eq(s.board[S('a6')].type, 'R'); eq(s.board[S('a7')].type, 'P'); eq(s.bananas.b.length, 0);
+  s = position({ e1: 'wK', h8: 'bK', b1: 'wN', h7: 'bP' }, 'b', PW);
+  withPower(s, 'b', 'banana'); E.usePower(s, 0, { at: S('b2') });
+  mv(s, 'b1', 'c3');
+  eq(s.board[S('c3')].type, 'N'); eq(s.bananas.b.length, 1);
+});
 test('time rewind undoes the last two moves', () => {
   const s = E.newGame(PW);
   withPower(s, 'w', 'rewind');

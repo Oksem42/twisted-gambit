@@ -670,10 +670,10 @@ function boardDiff(before, after) {
 /** After a move: a banana slip or a portal warp gets its own effect (and a slide, even for a dragged piece). */
 function moveFx(m, dropped) {
   const last = G.history[G.history.length - 1], note = (last && last.note) || '';
-  if (!G.lastMove || G.lastMove.to === m.to) return;
-  const warp = note.includes('[portals]'), slip = note.includes('[banana]');
-  ui.anim = [{ from: dropped ? m.to : m.from, via: m.to, to: G.lastMove.to, dur: warp ? 1300 : 1100, style: warp ? 'warp' : 'slip', ease: 'ease-out' }];
-  ui.fx = slip ? { kind: 'slip', at: m.to } : { kind: 'warp', a: m.to, b: G.lastMove.to };
+  if (!G.lastMove || (G.lastMove.to === m.to && G.lastMove.via == null)) return;
+  const warp = note.includes('[portals]'), slip = note.includes('[banana]'), via = G.lastMove.via != null ? G.lastMove.via : m.to;
+  ui.anim = [{ from: dropped ? m.to : m.from, via, to: G.lastMove.to, dur: warp ? 1300 : 1100, style: warp ? 'warp' : 'slip', ease: 'ease-out' }];
+  ui.fx = slip ? { kind: 'slip', at: via } : { kind: 'warp', a: via, b: G.lastMove.to };
   ui.fxUntil = performance.now() + 1400;
 }
 // [build-up before anything moves, travel time, easing, travel style]
@@ -2007,8 +2007,9 @@ function openRules() {
         <li><b>Prophecy:</b> press <b>Use Prophecy</b>, make your move, then pick the reply you expect. If it comes true, your next turn is a double move, but the bonus is lost if your first move gives check. After using it, it recharges for 5 of your turns.</li>
         <li><b>Shapeshifter:</b> it keeps its look after changing. It's revealed when it makes a move its look couldn't, or when it gives check.</li>
         <li><b>Gambler's Gambit:</b> your chance to win a capture is your piece's value divided by both pieces' values (pawn 1, knight 3, bishop 3, rook 5, queen 9). If you win, you capture normally. If you lose, your attacker is removed and the defender stays. Only a king always wins. If losing a spin leaves your king in check, you move again right away, and if you can't escape it's checkmate.</li>
+        <li><b>Banana Peel:</b> a piece that stops on or runs over an enemy peel slips: it stops on the peel and slides on in the same direction until something blocks it (a capture it was heading for doesn't happen). Knights jump over peels, and kings never slip.</li>
         <li><b>"Regular chess":</b> you always hold 3 powers (hover one to read it). Using a power takes your turn, except Time Rewind, which undoes your last move and your opponent's reply so you can move again. A used power recharges for 3 of your turns, then comes back as a new random power. No power can leave your own king in check, and kings are never pushed, pulled, spun, slipped or warped.</li>
-        <li><b>Minigames:</b> Snake, Asteroid Dodge and Tug of War pop up for both players at once, and the clocks pause. Snake's prize is a Snake piece that moves like a king, a queen and a knight combined. Asteroid Dodge's prize is two moves in a row next turn. Tug of War's prize is a free push: on your turn, push one enemy piece one square before you move. In pass &amp; play, White uses W A S D (or A to tap) and Black uses the arrow keys (or L to tap).</li>
+        <li><b>Minigames:</b> Snake, Asteroid Dodge and Tug of War pop up for both players at once, and the clocks pause. In Snake, crashing loses: the last snake standing wins, and if both last the full 30 seconds, the most apples wins. Snake's prize is a Snake piece that moves like a king, a queen and a knight combined. Asteroid Dodge's prize is two moves in a row next turn. Tug of War's prize is a free push: on your turn, push one enemy piece one square before you move. In pass &amp; play, White uses W A S D (or A to tap) and Black uses the arrow keys (or L to tap).</li>
         <li><b>Coins and shop:</b> earn 1 coin per move, plus the defeated piece's value when you win a spin, and 2 coins when your attacker loses one. Pawn 3, knight 8, bishop 8, rook 12, queen 20. Buying uses your turn. Bought pieces go on an empty square in your half (pawns not on your back rank), can block a check, and can't give check when placed.</li>
         <li><b>Secret Swap:</b> takes your turn and can't be used while you're in check. The move list shows that a swap happened, but not which pieces. A swapped piece is revealed when it makes a move its disguise couldn't.</li>
         <li><b>Clock:</b> each player has 10 minutes for the whole game, counting down on their turn. Run out and you lose, unless your opponent only has a king (or a king and one bishop or knight), which is a draw.</li>

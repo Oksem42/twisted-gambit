@@ -1,9 +1,10 @@
 (function () {
 // Power Chess minigames: Snake, Asteroid Dodge and Tug of War.
-// Every player gets the same seeded level. Survival games score by how long you last (Snake breaks ties
+// Every player gets the same seeded level. Snake: the last snake standing wins, or if both last the whole
+// 30 seconds, the most apples. Asteroid Dodge scores how long you last. (Snake used to break ties
 // by length); Tug of War scores taps in 5 seconds. Pass & play splits the screen with separate keys.
 const KINDS = {
-  snake: { title: 'Snake', help: "Eat apples and don't crash into the walls or yourself. Whoever survives longest wins.", tickMs: 120, cap: 250 },
+  snake: { title: 'Snake', help: 'Crash into a wall or yourself and you lose: the last snake standing wins. If both last the full 30 seconds, the most apples wins.', tickMs: 120, cap: 250 },
   asteroids: { title: 'Asteroid Dodge', help: 'Steer left and right to dodge the falling rocks. Whoever survives longest wins.', tickMs: 50, cap: 600 },
   tug: { title: 'Tug of War', help: 'Tap as fast as you can! Most taps in 5 seconds wins.', tickMs: 50, cap: 100 },
 };
@@ -56,7 +57,10 @@ function steerSnake(g, d) {
   const v = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[d];
   if (v && !(v[0] === -g.dir[0] && v[1] === -g.dir[1])) g.next = v;
 }
-const snakeScore = (g) => g.ticks * 100 + g.body.length;
+// Crashed: the tick you crashed on (later is better). Lasted the whole time: SURVIVED + apples, which beats any crash.
+const SURVIVED = 100000;
+const apples = (g) => g.body.length - 3;
+const snakeScore = (g) => (g.alive && g.ticks >= KINDS.snake.cap ? SURVIVED + apples(g) : g.ticks);
 
 const AW = 300, AH = 300;
 function newRocks(seed) { return { r: rng(seed), x: AW / 2, rocks: [], ticks: 0, alive: true, left: false, right: false }; }
@@ -130,7 +134,15 @@ function start(el, opts) {
   const st = {}; // per color: { game, score, done, final, view }
   let running = false, stopped = false, t0 = 0, raf = 0, last = 0, acc = 0, progTimer = 0;
   const tug = { w: 0, b: 0 };
-  const fmt = (c) => (opts.kind === 'tug' ? `${st[c].score} taps` : `${((opts.kind === 'snake' ? Math.floor(st[c].score / 100) : st[c].score) * K.tickMs / 1000).toFixed(1)}s`);
+  const fmt = (c) => {
+    const s = st[c];
+    if (opts.kind === 'tug') return `${s.score} taps`;
+    if (opts.kind === 'snake') {
+      if (s.game) return `${apples(s.game)} apple${apples(s.game) === 1 ? '' : 's'}${s.done ? (s.game.alive ? ' · made it!' : ' · crashed') : ''}`;
+      return s.done ? (s.score >= SURVIVED ? `Made it · ${s.score - SURVIVED} apples` : 'Crashed') : 'Alive';
+    }
+    return `${(s.score * K.tickMs / 1000).toFixed(1)}s`;
+  };
 
   for (const p of players) {
     const s = st[p.color] = { score: 0, done: false, final: null, p };
@@ -138,7 +150,11 @@ function start(el, opts) {
     if (p.type === 'bot') {
       const [a, b] = BOT_RANGE[opts.kind][p.bot === 'jules' ? 'jules' : 'v1'];
       const v = Math.round(a + Math.random() * (b - a));
-      s.final = opts.kind === 'snake' ? v * 100 + 3 + Math.floor(v / 22) : v;
+      s.final = v;
+      if (opts.kind === 'snake') { // bots either crash at some point, or make it to the end with some apples
+        const j = p.bot === 'jules', crash = Math.random() < (j ? 0.25 : 0.55);
+        s.final = crash ? v : SURVIVED + Math.round(j ? 7 + Math.random() * 8 : 3 + Math.random() * 7);
+      }
     }
   }
 
@@ -170,7 +186,7 @@ function start(el, opts) {
       if (opts.kind === 'snake') drawSnake(cv(p.color).getContext('2d'), s.game, p.color);
       if (opts.kind === 'asteroids') drawRocks(cv(p.color).getContext('2d'), s.game);
       const sc = el.querySelector(`[data-sc="${p.color}"]`);
-      if (sc) sc.textContent = fmt(p.color) + (s.done ? ' · done' : '');
+      if (sc) sc.textContent = fmt(p.color) + (s.done && opts.kind !== 'snake' ? ' · done' : '');
     }
     if (opts.kind === 'tug') {
       const live = (c) => (st[c].p.type === 'local' ? tug[c] : st[c].score);
@@ -181,7 +197,8 @@ function start(el, opts) {
       const s = st[p.color], box = el.querySelector(`.mg-opp[data-c="${p.color}"] .mg-oscore`);
       if (!box) continue;
       if (opts.kind === 'tug') box.textContent = `${s.score} taps${s.done ? ' · done' : ''}`;
-      else box.textContent = s.done ? `${opts.kind === 'snake' ? 'Crashed' : 'Hit'} at ${fmt(p.color)}` : `Alive · ${fmt(p.color)}`;
+      else if (opts.kind === 'snake') box.textContent = fmt(p.color);
+      else box.textContent = s.done ? `Hit at ${fmt(p.color)}` : `Alive · ${fmt(p.color)}`;
     }
   };
   draw();
@@ -237,12 +254,13 @@ function start(el, opts) {
       const s = st[p.color];
       if (opts.kind === 'tug') s.score = Math.min(s.final, Math.floor(s.final * Math.min(1, elapsed / 5000)));
       else {
-        const ticks = Math.floor(elapsed / K.tickMs), finalTicks = opts.kind === 'snake' ? Math.floor(s.final / 100) : s.final;
-        s.score = opts.kind === 'snake' ? Math.min(ticks, finalTicks) * 100 : Math.min(ticks, finalTicks);
+        const ticks = Math.floor(elapsed / K.tickMs), finalTicks = opts.kind === 'snake' && s.final >= SURVIVED ? K.cap : s.final;
+        s.score = Math.min(ticks, finalTicks);
         if (ticks >= finalTicks) { s.done = true; s.score = s.final; opts.onDone(p.color, s.final); } // the bot is out: report it now
       }
     }
-    if (running) status.textContent = opts.kind === 'tug' ? `${Math.max(0, (5 - elapsed / 1000)).toFixed(1)}s` : 'Go!';
+    if (running) status.textContent = opts.kind === 'tug' ? `${Math.max(0, (5 - elapsed / 1000)).toFixed(1)}s`
+      : opts.kind === 'snake' ? `${Math.max(0, Math.ceil((K.cap * K.tickMs - elapsed) / 1000))}s left` : 'Go!';
     draw();
   };
 
